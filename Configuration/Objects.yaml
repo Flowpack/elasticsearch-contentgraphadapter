@@ -1,0 +1,5 @@
+Neos\ContentRepository\Search\Search\QueryBuilderInterface:
+  className: Flowpack\ElasticSearch\ContentGraphAdapter\Eel\ElasticSearchQueryBuilder
+
+Neos\ContentRepository\DimensionSpace\Dimension\ContentDimensionSourceInterface:
+  className: Neos\ContentRepository\InMemoryGraph\Dimension\LegacyConfigurationAndWorkspaceBasedContentDimensionSource

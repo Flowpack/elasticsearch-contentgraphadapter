@@ -1,0 +1,20 @@
+{
+    "description": "The ElasticSearch adapter for the Neos Content Repository using the in-memory content graph",
+    "type": "neos-package",
+    "name": "flowpack/elasticsearch-contentgraphadapter",
+    "require": {
+        "neos/neos": "~4.3",
+        "flowpack/elasticsearch-contentrepositoryadaptor": "~5.0",
+        "neos/content-repository-inmemorygraph": "*"
+    },
+    "autoload": {
+        "psr-4": {
+            "Flowpack\\ElasticSearch\\ContentGraphAdapter\\": "Classes"
+        }
+    },
+    "extra": {
+        "neos": {
+            "package-key": "Flowpack.ElasticSearch.ContentGraphAdapter"
+        }
+    }
+}

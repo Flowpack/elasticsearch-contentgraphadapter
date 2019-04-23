@@ -1,0 +1,5 @@
+Neos:
+  ContentRepository:
+    Search:
+      defaultContext:
+        Indexing: Flowpack\ElasticSearch\ContentGraphAdapter\Eel\IndexingHelper
