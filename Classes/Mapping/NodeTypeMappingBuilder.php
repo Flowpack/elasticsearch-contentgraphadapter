@@ -31,7 +31,7 @@ class NodeTypeMappingBuilder extends FlowpackMapping\NodeTypeMappingBuilder
      * @param \Flowpack\ElasticSearch\Domain\Model\Index $index
      * @return \Flowpack\ElasticSearch\Mapping\MappingCollection<\Flowpack\ElasticSearch\Domain\Model\Mapping>
      */
-    public function buildMappingInformation(Index $index)
+    public function buildMappingInformation(Index $index): MappingCollection
     {
         $this->lastMappingErrors = new \Neos\Error\Messages\Result();
 

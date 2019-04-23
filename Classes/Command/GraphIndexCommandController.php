@@ -11,12 +11,13 @@ namespace Flowpack\ElasticSearch\ContentGraphAdapter\Command;
  * information, please view the LICENSE file which was distributed with this
  * source code.
  */
-use CORE4\Neos\ElasticSearch\ContentGraphAdapter\Indexer\NodeIndexer;
-use CORE4\Neos\ElasticSearch\ContentGraphAdapter\Mapping\NodeTypeMappingBuilder;
+use Flowpack\ElasticSearch\ContentGraphAdapter\Indexer\NodeIndexer;
+use Flowpack\ElasticSearch\ContentGraphAdapter\Mapping\NodeTypeMappingBuilder;
+use Flowpack\ElasticSearch\ContentRepositoryAdaptor\LoggerInterface;
 use Flowpack\ElasticSearch\Transfer\Exception\ApiException;
 use Neos\Flow\Configuration\ConfigurationManager;
 use Neos\Flow\ObjectManagement\ObjectManagerInterface;
-use Neos\ContentRepository\InMemoryGraph\GraphService;
+use Neos\ContentRepository\InMemoryGraph\ContentSubgraph\GraphService;
 use Neos\Flow\Annotations as Flow;
 use Neos\Flow\Cli\CommandController;
 use Neos\ContentRepository\Domain as ContentRepository;
@@ -48,7 +49,7 @@ class GraphIndexCommandController extends CommandController
 
     /**
      * @Flow\Inject
-     * @var \Flowpack\ElasticSearch\ContentRepositoryAdaptor\LoggerInterface
+     * @var LoggerInterface
      */
     protected $logger;
 
@@ -69,11 +70,6 @@ class GraphIndexCommandController extends CommandController
      */
     protected $settings;
 
-    /**
-     * Called by the Flow object framework after creating the object and resolving all dependencies.
-     *
-     * @param integer $cause Creation cause
-     */
     public function initializeObject($cause)
     {
         if ($cause === ObjectManagerInterface::INITIALIZATIONCAUSE_CREATED) {
@@ -91,8 +87,11 @@ class GraphIndexCommandController extends CommandController
      * @param string $workspace name of the workspace which should be indexed
      * @param string $postfix Index postfix, index with the same postifix will be deleted if exist
      * @return void
+     * @throws ApiException
+     * @throws \Flowpack\ElasticSearch\ContentRepositoryAdaptor\Exception
+     * @throws \Neos\ContentRepository\Exception\NodeTypeNotFoundException
      */
-    public function buildCommand($limit = null, $update = false, $workspace = null, $postfix = null)
+    public function buildCommand($limit = null, $update = false, $workspace = null, $postfix = null): void
     {
         if ($update === true) {
             $this->logger->log('!!! Update Mode (Development) active!', LOG_INFO);
@@ -116,19 +115,18 @@ class GraphIndexCommandController extends CommandController
         $this->logger->log(sprintf('Indexing %snodes ... ', ($limit !== null ? 'the first ' . $limit . ' ' : '')), LOG_INFO);
 
         $this->outputLine('Initializing content graph...');
-        $query = $this->nodeDataRepository->createQuery();
-        $numberOfNodes = $query->matching($query->equals('workspace', 'live'))->count();
         $graph = $this->graphService->getContentGraph($this->output);
 
         $this->outputLine('Indexing content graph...');
         $time = time();
         $this->output->progressStart(count($graph->getNodes()));
-        $indexedEdges = 0;
+        $indexedHierarchyRelations = 0;
         $nodesSinceLastFlush = 0;
+        $this->nodeIndexer->setContentGraph($graph);
         foreach ($graph->getNodes() as $node) {
             $this->nodeIndexer->indexGraphNode($node);
             $nodesSinceLastFlush++;
-            $indexedEdges += count($node->getIncomingEdges());
+            $indexedHierarchyRelations += count($node->getIncomingHierarchyRelations());
             $this->output->progressAdvance();
             if ($nodesSinceLastFlush >= 100) {
                 $this->nodeIndexer->flush();
@@ -138,7 +136,7 @@ class GraphIndexCommandController extends CommandController
         $this->output->progressFinish();
         $this->nodeIndexer->flush();
         $timeSpent = time() - $time;
-        $this->logger->log('Done. Indexed ' . count($graph->getNodes()) . ' nodes and ' . $indexedEdges . ' edges in ' . $timeSpent . ' s at ' . round(count($graph->getNodes()) / $timeSpent) . ' nodes/s (' . round($indexedEdges / $timeSpent) . ' edges/s)',
+        $this->logger->log('Done. Indexed ' . count($graph->getNodes()) . ' nodes and ' . $indexedHierarchyRelations . ' edges in ' . $timeSpent . ' s at ' . round(count($graph->getNodes()) / $timeSpent) . ' nodes/s (' . round($indexedHierarchyRelations / $timeSpent) . ' edges/s)',
             LOG_INFO);
         $this->nodeIndexer->getIndex()->refresh();
 
@@ -152,6 +150,7 @@ class GraphIndexCommandController extends CommandController
      * Clean up old indexes (i.e. all but the current one)
      *
      * @return void
+     * @throws \Flowpack\ElasticSearch\ContentRepositoryAdaptor\Exception
      */
     public function cleanupCommand()
     {

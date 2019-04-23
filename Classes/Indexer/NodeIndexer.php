@@ -11,6 +11,7 @@ namespace Flowpack\ElasticSearch\ContentGraphAdapter\Indexer;
  * source code.
  */
 
+use Flowpack\ElasticSearch\ContentGraphAdapter\NodeAggregate\LegacyNodeAdapter;
 use Flowpack\ElasticSearch\ContentRepositoryAdaptor\ElasticSearchClient;
 use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Exception;
 use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Driver\Version5\Mapping\NodeTypeMappingBuilder;
@@ -20,13 +21,18 @@ use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Driver\RequestDriverInterfac
 use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Driver\SystemDriverInterface;
 use Flowpack\ElasticSearch\Domain\Model\Document as ElasticSearchDocument;
 use Flowpack\ElasticSearch\Domain\Model\Index;
+use Neos\ContentRepository\DimensionSpace\DimensionSpace\DimensionSpacePointSet;
+use Neos\ContentRepository\Domain\Model\NodeType;
+use Neos\ContentRepository\InMemoryGraph\ContentSubgraph\ContentGraph;
+use Neos\ContentRepository\InMemoryGraph\ContentSubgraph\ContentSubgraphIdentifier;
+use Neos\ContentRepository\InMemoryGraph\ContentSubgraph\TraversableNode;
+use Neos\ContentRepository\InMemoryGraph\NodeAggregate\Node;
 use Neos\ContentRepository\Search\Indexer\AbstractNodeIndexer;
 use Neos\Flow\Annotations as Flow;
 use Neos\ContentRepository\Domain\Model\NodeInterface;
 use Neos\ContentRepository\Domain\Service\ContentDimensionCombinator;
 use Neos\ContentRepository\Domain\Service\ContextFactory;
 use Neos\ContentRepository\Domain\Service\NodeTypeManager;
-use Neos\ContentRepository\InMemoryGraph\ReadOnlyNode;
 
 /**
  * Indexer for Content Repository Nodes. Triggered from the NodeIndexingManager.
@@ -111,6 +117,11 @@ class NodeIndexer extends AbstractNodeIndexer
     protected $systemDriver;
 
     /**
+     * @var ContentGraph
+     */
+    protected $contentGraph;
+
+    /**
      * The current ElasticSearch bulk request, in the format required by http://www.elasticsearch.org/guide/en/elasticsearch/reference/current/docs-bulk.html
      *
      * @var array
@@ -177,21 +188,32 @@ class NodeIndexer extends AbstractNodeIndexer
         // Not going to happen
     }
 
-    /**
-     * @param ReadOnlyNode $node
-     * @throws \Neos\ContentRepository\Exception\NodeTypeNotFoundException
-     */
-    public function indexGraphNode(ReadOnlyNode $node)
+    public function setContentGraph(ContentGraph $contentGraph): void
     {
-        $nodeAdaptor = $node;
-        $mappingType = $this->getIndex()->findType(NodeTypeMappingBuilder::convertNodeTypeNameToMappingName($nodeAdaptor->getNodeType()));
+        $this->contentGraph = $contentGraph;
+    }
+
+    public function indexGraphNode(TraversableNode $traversableNode): void
+    {
+        $occupiedDimensionSpacePoints = new DimensionSpacePointSet([$traversableNode->getOriginDimensionSpacePoint()]);
+        if ($this->isFulltextRoot($traversableNode->getNodeType())) {
+            $occupiedDimensionSpacePoints = $this->collectOccupiedDimensionSpacePointsForFulltextRoot($traversableNode->getDataNode(), $occupiedDimensionSpacePoints);
+        }
+
+        foreach ($occupiedDimensionSpacePoints as $occupiedDimensionSpacePoint) {
+            #$virtualVariant = new TraversableNode($traversableNode->getDataNode(), $this->contentGraph->getSubgraphByIdentifier(new ContentSubgraphIdentifier()));
+            // @todo handle virtual variants
+        }
+        $nodeAdapter = new LegacyNodeAdapter($traversableNode);
+        $dataNode = $traversableNode->getDataNode();
+        $mappingType = $this->getIndex()->findType($this->nodeTypeMappingBuilder->convertNodeTypeNameToMappingName($nodeAdapter->getNodeType()));
 
         $fulltextIndexOfNode = [];
 
-        $contextPath = $nodeAdaptor->getContextPath();
+        $contextPath = $nodeAdapter->getContextPath();
         $contextPathHash = sha1($contextPath);
-        $identifierForGraph = $node->getNodeIdentifier();
-        $nodePropertiesToBeStoredInIndex = $this->extractPropertiesAndFulltext($nodeAdaptor, $fulltextIndexOfNode, function ($propertyName) use ($identifierForGraph) {
+        $identifierForGraph = $traversableNode->getNodeAggregateIdentifier();
+        $nodePropertiesToBeStoredInIndex = $this->extractPropertiesAndFulltext($nodeAdapter, $fulltextIndexOfNode, function ($propertyName) use ($identifierForGraph) {
             $this->logger->log(sprintf('NodeIndexer (%s) - Property "%s" not indexed because no configuration found.', $identifierForGraph, $propertyName), LOG_DEBUG, null, 'ElasticSearch (CR)');
         });
         $document = new ElasticSearchDocument(
@@ -203,11 +225,11 @@ class NodeIndexer extends AbstractNodeIndexer
         $documentData = $document->getData();
         $documentData['__sortIndex'] = [];
 
-        $documentData['__edges'] = [];
+        $documentData['__hierarchyRelations'] = [];
 
-        foreach ($node->getIncomingEdges() as $incomingEdge) {
-            $documentData['__edges'][] = [
-                'tree' => $incomingEdge->getSubgraphHash(),
+        foreach ($dataNode->getIncomingHierarchyRelations() as $incomingEdge) {
+            $documentData['__hierarchyRelations'][] = [
+                'subgraph' => $incomingEdge->getSubgraphHash(),
                 'sortIndex' => $incomingEdge->getPosition(),
                 'accessRoles' => $incomingEdge->getProperty('accessRoles'),
                 'hidden' => $incomingEdge->getProperty('hidden'),
@@ -217,57 +239,63 @@ class NodeIndexer extends AbstractNodeIndexer
             ];
         }
 
-        foreach ($node->getIncomingReferenceEdges() as $referenceEdge) {
-            $documentData['__incomingReferenceEdges'][] = [
-                'source' => $referenceEdge->getSource()->getIdentifier(),
-                'name' => $referenceEdge->getName()
+        foreach ($dataNode->getIncomingReferenceRelations() as $referenceRelation) {
+            $documentData['__incomingReferenceRelations'][] = [
+                'source' => $referenceRelation->getSource()->getNodeAggregateIdentifier(),
+                'name' => $referenceRelation->getName()
             ];
         }
 
-        foreach ($node->getOutgoingReferenceEdges() as $referenceEdge) {
-            $documentData['__outgoingReferenceEdges'][] = [
-                'target' => $referenceEdge->getTarget()->getIdentifier(),
-                'name' => $referenceEdge->getName(),
-                'sortIndex' => $referenceEdge->getPosition()
+        foreach ($dataNode->getOutgoingReferenceRelations() as $referenceRelation) {
+            $documentData['__outgoingReferenceRelations'][] = [
+                'target' => (string)$referenceRelation->getTarget()->getIdentifier(),
+                'name' => $referenceRelation->getName(),
+                'sortIndex' => $referenceRelation->getPosition()
             ];
         }
 
-        if ($this->isFulltextEnabled($nodeAdaptor)) {
-            $this->currentBulkRequest[] = $this->indexerDriver->document($this->getIndexName(), $nodeAdaptor, $document, $documentData);
-            $this->currentBulkRequest[] = $this->indexerDriver->fulltext($nodeAdaptor, $fulltextIndexOfNode);
+        if ($this->isFulltextEnabled($nodeAdapter)) {
+            $this->currentBulkRequest[] = $this->indexerDriver->document($this->getIndexName(), $nodeAdapter, $document, $documentData);
+            $this->currentBulkRequest[] = $this->indexerDriver->fulltext($nodeAdapter, $fulltextIndexOfNode);
         }
 
-        $this->logger->log(sprintf('NodeIndexer: Added / updated node %s. ID: %s Context: %s', $contextPath, $contextPathHash, json_encode($nodeAdaptor->getContext()->getProperties())), LOG_DEBUG, null,
+        $this->logger->log(sprintf('NodeIndexer: Added / updated node %s. ID: %s Context: %s', $contextPath, $contextPathHash, json_encode($nodeAdapter->getContext()->getProperties())), LOG_DEBUG, null,
             'ElasticSearch (CR)');
     }
 
-    /**
-     * Whether the node has fulltext indexing enabled.
-     *
-     * @param NodeInterface $node
-     * @return bool
-     */
-    protected function isFulltextEnabled(NodeInterface $node)
+    protected function isFulltextRoot(NodeType $nodeType): bool
     {
-        if (!isset($this->fulltextRegistry[$node->getNodeType()->getName()])) {
-            $this->fulltextRegistry[$node->getNodeType()->getName()] = false;
-            $nodeType = $this->nodeTypeManager->getNodeType($node->getNodeType()->getName());
+        if (!isset($this->fulltextRegistry[$nodeType->getName()])) {
+            $this->fulltextRegistry[$nodeType->getName()] = false;
+            $nodeType = $this->nodeTypeManager->getNodeType($nodeType->getName());
             if ($nodeType->hasConfiguration('search')) {
                 $searchSettingsForNode = $nodeType->getConfiguration('search');
                 if (isset($searchSettingsForNode['fulltext']['enable']) && $searchSettingsForNode['fulltext']['enable'] === true) {
-                    $this->fulltextRegistry[$node->getNodeType()->getName()] = true;
+                    $this->fulltextRegistry[$nodeType->getName()] = true;
                 }
             }
         }
 
-        return $this->fulltextRegistry[$node->getNodeType()->getName()];
+        return $this->fulltextRegistry[$nodeType->getName()];
+    }
+
+    protected function collectOccupiedDimensionSpacePointsForFulltextRoot(Node $currentNode, DimensionSpacePointSet $dimensionSpacePoints): DimensionSpacePointSet
+    {
+        if (!$dimensionSpacePoints->contains($currentNode->getOriginDimensionSpacePoint())) {
+            $dimensionSpacePoints = $dimensionSpacePoints->getUnion(new DimensionSpacePointSet([$currentNode->getOriginDimensionSpacePoint()]));
+        }
+
+        foreach ($currentNode->getOutgoingHierarchyRelations() as $outgoingHierarchyRelation) {
+            $dimensionSpacePoints = $this->collectOccupiedDimensionSpacePointsForFulltextRoot($outgoingHierarchyRelation->getChild(), $dimensionSpacePoints);
+        }
+
+        return $dimensionSpacePoints;
     }
 
     /**
      * Schedule node removal into the current bulk request.
      *
      * @param NodeInterface $node
-     * @return string
      */
     public function removeNode(NodeInterface $node)
     {
@@ -283,7 +311,7 @@ class NodeIndexer extends AbstractNodeIndexer
         $this->currentBulkRequest[] = [
             [
                 'delete' => [
-                    '_type' => NodeTypeMappingBuilder::convertNodeTypeNameToMappingName($node->getNodeType()),
+                    '_type' => $this->nodeTypeMappingBuilder->convertNodeTypeNameToMappingName($node->getNodeType()),
                     '_id' => $identifier
                 ]
             ]

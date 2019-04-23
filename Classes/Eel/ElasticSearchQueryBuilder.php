@@ -11,20 +11,20 @@ namespace Flowpack\ElasticSearch\ContentGraphAdapter\Eel;
  * source code.
  */
 
+use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Eel\ElasticSearchQuery;
 use Neos\Flow\Annotations as Flow;
 use Neos\Flow\Security\Context as SecurityContext;
 use Neos\ContentRepository\Domain\Model\NodeInterface;
 use Neos\ContentRepository\Domain\Service\ContentDimensionPresetSourceInterface;
 use Neos\ContentRepository\Search\Search\QueryBuilderInterface;
 use Neos\ContentRepository\DimensionSpace\DimensionSpace;
-use Neos\ContentRepository\InMemoryGraph\DimensionSpacePointFactory;
-use Neos\ContentRepository\InMemoryGraph\ContentSubgraphIdentifier;
-use CORE4\Neos\ElasticSearch\AdvancedQueryBuilder\Eel\ElasticSearchQueryBuilder as AdvancedQueryBuilder;
+use Neos\ContentRepository\InMemoryGraph\Dimension\DimensionSpacePointFactory;
+use Neos\ContentRepository\InMemoryGraph\ContentSubgraph\ContentSubgraphIdentifier;
 
 /**
  * Query Builder for ElasticSearch Queries
  */
-class ElasticSearchQueryBuilder extends AdvancedQueryBuilder
+class ElasticSearchQueryBuilder extends ElasticSearchQuery
 {
     /**
      * @Flow\Inject
@@ -85,13 +85,13 @@ class ElasticSearchQueryBuilder extends AdvancedQueryBuilder
         $contentSubgraphIdentifier = new ContentSubgraphIdentifier($workspaceName, $dimensionSpacePoint);
 
         $edgeFilter = [
-            'path' => '__edges',
+            'path' => '__hierarchyRelations',
             'query' => [
                 'bool' => [
                     'must' => [
                         [
                             'match' => [
-                                '__edges.tree' => (string) $contentSubgraphIdentifier,
+                                '__hierarchyRelations.subgraph' => (string) $contentSubgraphIdentifier,
                             ],
                         ],
                     ],
@@ -104,19 +104,19 @@ class ElasticSearchQueryBuilder extends AdvancedQueryBuilder
         if (!$contextNode->getContext()->isInvisibleContentShown()) {
             $edgeFilter['query']['bool']['must_not'][] = [
                 'match' => [
-                    '__edges.hidden' => true,
+                    '__hierarchyRelations.hidden' => true,
                 ],
             ];
             $edgeFilter['query']['bool']['must_not'][] = [
                 'range' => [
-                    '__edges.hiddenBeforeDateTime' => [
+                    '__hierarchyRelations.hiddenBeforeDateTime' => [
                         'gt' => 'now'
                     ]
                 ]
             ];
             $edgeFilter['query']['bool']['must_not'][] = [
                 'range' => [
-                    '__edges.hiddenAfterDateTime' => [
+                    '__hierarchyRelations.hiddenAfterDateTime' => [
                         'lt' => 'now'
                     ]
                 ]
