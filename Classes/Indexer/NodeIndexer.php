@@ -22,10 +22,10 @@ use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Driver\SystemDriverInterface
 use Flowpack\ElasticSearch\Domain\Model\Document as ElasticSearchDocument;
 use Flowpack\ElasticSearch\Domain\Model\Index;
 use Neos\ContentRepository\DimensionSpace\DimensionSpace\DimensionSpacePointSet;
-use Neos\ContentRepository\Domain\Model\NodeType;
+use Neos\ContentRepository\Domain\ContentStream\ContentStreamIdentifier;
 use Neos\ContentRepository\InMemoryGraph\ContentSubgraph\ContentGraph;
-use Neos\ContentRepository\InMemoryGraph\ContentSubgraph\ContentSubgraphIdentifier;
 use Neos\ContentRepository\InMemoryGraph\ContentSubgraph\TraversableNode;
+use Neos\ContentRepository\InMemoryGraph\Dimension\LegacyConfigurationAndWorkspaceBasedContentDimensionSource;
 use Neos\ContentRepository\InMemoryGraph\NodeAggregate\Node;
 use Neos\ContentRepository\Search\Indexer\AbstractNodeIndexer;
 use Neos\Flow\Annotations as Flow;
@@ -196,87 +196,84 @@ class NodeIndexer extends AbstractNodeIndexer
     public function indexGraphNode(TraversableNode $traversableNode): void
     {
         $occupiedDimensionSpacePoints = new DimensionSpacePointSet([$traversableNode->getOriginDimensionSpacePoint()]);
-        if ($this->isFulltextRoot($traversableNode->getNodeType())) {
+        $isFulltextRoot = IsFulltextRoot::isSatisfiedBy($traversableNode);
+        if ($isFulltextRoot) {
             $occupiedDimensionSpacePoints = $this->collectOccupiedDimensionSpacePointsForFulltextRoot($traversableNode->getDataNode(), $occupiedDimensionSpacePoints);
         }
 
-        foreach ($occupiedDimensionSpacePoints as $occupiedDimensionSpacePoint) {
-            #$virtualVariant = new TraversableNode($traversableNode->getDataNode(), $this->contentGraph->getSubgraphByIdentifier(new ContentSubgraphIdentifier()));
-            // @todo handle virtual variants
-        }
-        $nodeAdapter = new LegacyNodeAdapter($traversableNode);
         $dataNode = $traversableNode->getDataNode();
-        $mappingType = $this->getIndex()->findType($this->nodeTypeMappingBuilder->convertNodeTypeNameToMappingName($nodeAdapter->getNodeType()));
+        $mappingType = $this->getIndex()->findType($this->nodeTypeMappingBuilder->convertNodeTypeNameToMappingName($traversableNode->getNodeType()));
+        foreach ($occupiedDimensionSpacePoints as $occupiedDimensionSpacePoint) {
+            $matchingSubgraph = $this->contentGraph->getSubgraphByIdentifier(
+                ContentStreamIdentifier::fromString($occupiedDimensionSpacePoint->getCoordinate(LegacyConfigurationAndWorkspaceBasedContentDimensionSource::WORKSPACE_DIMENSION_IDENTIFIER)),
+                $occupiedDimensionSpacePoint
+            );
+            $virtualVariant = new TraversableNode($dataNode, $matchingSubgraph);
+            $nodeAdapter = new LegacyNodeAdapter($virtualVariant);
+            $fulltextIndexOfNode = [];
+            $nodePropertiesToBeStoredInIndex = $this->extractPropertiesAndFulltext($nodeAdapter, $fulltextIndexOfNode, function ($propertyName) use ($nodeAdapter) {
+                $this->logger->log(sprintf('NodeIndexer (%s) - Property "%s" not indexed because no configuration found.', $nodeAdapter->getIdentifier(), $propertyName), LOG_DEBUG, null, 'ElasticSearch (CR)');
+            });
 
-        $fulltextIndexOfNode = [];
+            $document = new ElasticSearchDocument(
+                $mappingType,
+                $nodePropertiesToBeStoredInIndex,
+                (string)DocumentIdentifier::fromTraversableNode($virtualVariant)
+            );
+            $documentData = $document->getData();
+            $documentData['__sortIndex'] = [];
+            $documentData['__hierarchyRelations'] = [];
 
-        $contextPath = $nodeAdapter->getContextPath();
-        $contextPathHash = sha1($contextPath);
-        $identifierForGraph = $traversableNode->getNodeAggregateIdentifier();
-        $nodePropertiesToBeStoredInIndex = $this->extractPropertiesAndFulltext($nodeAdapter, $fulltextIndexOfNode, function ($propertyName) use ($identifierForGraph) {
-            $this->logger->log(sprintf('NodeIndexer (%s) - Property "%s" not indexed because no configuration found.', $identifierForGraph, $propertyName), LOG_DEBUG, null, 'ElasticSearch (CR)');
-        });
-        $document = new ElasticSearchDocument(
-            $mappingType,
-            $nodePropertiesToBeStoredInIndex,
-            $contextPathHash
-        );
-
-        $documentData = $document->getData();
-        $documentData['__sortIndex'] = [];
-
-        $documentData['__hierarchyRelations'] = [];
-
-        foreach ($dataNode->getIncomingHierarchyRelations() as $incomingEdge) {
-            $documentData['__hierarchyRelations'][] = [
-                'subgraph' => $incomingEdge->getSubgraphHash(),
-                'sortIndex' => $incomingEdge->getPosition(),
-                'accessRoles' => $incomingEdge->getProperty('accessRoles'),
-                'hidden' => $incomingEdge->getProperty('hidden'),
-                'hiddenBeforeDateTime' => $incomingEdge->getProperty('hiddenBeforeDateTime') ? $incomingEdge->getProperty('hiddenBeforeDateTime')->format('Y-m-d\TH:i:sP') : null,
-                'hiddenAfterDateTime' => $incomingEdge->getProperty('hiddenAfterDateTime') ? $incomingEdge->getProperty('hiddenAfterDateTime')->format('Y-m-d\TH:i:sP') : null,
-                'hiddenInIndex' => $incomingEdge->getProperty('hiddenInIndex')
-            ];
-        }
-
-        foreach ($dataNode->getIncomingReferenceRelations() as $referenceRelation) {
-            $documentData['__incomingReferenceRelations'][] = [
-                'source' => $referenceRelation->getSource()->getNodeAggregateIdentifier(),
-                'name' => $referenceRelation->getName()
-            ];
-        }
-
-        foreach ($dataNode->getOutgoingReferenceRelations() as $referenceRelation) {
-            $documentData['__outgoingReferenceRelations'][] = [
-                'target' => (string)$referenceRelation->getTarget()->getIdentifier(),
-                'name' => $referenceRelation->getName(),
-                'sortIndex' => $referenceRelation->getPosition()
-            ];
-        }
-
-        if ($this->isFulltextEnabled($nodeAdapter)) {
-            $this->currentBulkRequest[] = $this->indexerDriver->document($this->getIndexName(), $nodeAdapter, $document, $documentData);
-            $this->currentBulkRequest[] = $this->indexerDriver->fulltext($nodeAdapter, $fulltextIndexOfNode);
-        }
-
-        $this->logger->log(sprintf('NodeIndexer: Added / updated node %s. ID: %s Context: %s', $contextPath, $contextPathHash, json_encode($nodeAdapter->getContext()->getProperties())), LOG_DEBUG, null,
-            'ElasticSearch (CR)');
-    }
-
-    protected function isFulltextRoot(NodeType $nodeType): bool
-    {
-        if (!isset($this->fulltextRegistry[$nodeType->getName()])) {
-            $this->fulltextRegistry[$nodeType->getName()] = false;
-            $nodeType = $this->nodeTypeManager->getNodeType($nodeType->getName());
-            if ($nodeType->hasConfiguration('search')) {
-                $searchSettingsForNode = $nodeType->getConfiguration('search');
-                if (isset($searchSettingsForNode['fulltext']['enable']) && $searchSettingsForNode['fulltext']['enable'] === true) {
-                    $this->fulltextRegistry[$nodeType->getName()] = true;
-                }
+            foreach ($dataNode->getIncomingHierarchyRelations() as $incomingEdge) {
+                $documentData['__hierarchyRelations'][] = [
+                    'subgraph' => $incomingEdge->getSubgraphHash(),
+                    'sortIndex' => $incomingEdge->getPosition(),
+                    'accessRoles' => $incomingEdge->getProperty('accessRoles'),
+                    'hidden' => $incomingEdge->getProperty('hidden'),
+                    'hiddenBeforeDateTime' => $incomingEdge->getProperty('hiddenBeforeDateTime') ? $incomingEdge->getProperty('hiddenBeforeDateTime')->format('Y-m-d\TH:i:sP') : null,
+                    'hiddenAfterDateTime' => $incomingEdge->getProperty('hiddenAfterDateTime') ? $incomingEdge->getProperty('hiddenAfterDateTime')->format('Y-m-d\TH:i:sP') : null,
+                    'hiddenInIndex' => $incomingEdge->getProperty('hiddenInIndex')
+                ];
             }
-        }
 
-        return $this->fulltextRegistry[$nodeType->getName()];
+            foreach ($dataNode->getIncomingReferenceRelations() as $referenceRelation) {
+                $documentData['__incomingReferenceRelations'][] = [
+                    'source' => $referenceRelation->getSource()->getNodeAggregateIdentifier(),
+                    'name' => $referenceRelation->getName()
+                ];
+            }
+
+            foreach ($dataNode->getOutgoingReferenceRelations() as $referenceRelation) {
+                $documentData['__outgoingReferenceRelations'][] = [
+                    'target' => (string)$referenceRelation->getTarget()->getIdentifier(),
+                    'name' => $referenceRelation->getName(),
+                    'sortIndex' => $referenceRelation->getPosition()
+                ];
+            }
+
+            if ($isFulltextRoot) {
+                $this->currentBulkRequest[] = $this->indexerDriver->document($this->getIndexName(), $nodeAdapter, $document, $documentData);
+                $this->currentBulkRequest[] = $this->indexerDriver->fulltext($nodeAdapter, $fulltextIndexOfNode);
+            }
+
+            $serializedVariant = json_encode([
+                'nodeAggregateIdentifier' => $virtualVariant->getNodeAggregateIdentifier(),
+                'contentStreamIdentifier' => $virtualVariant->getContentStreamIdentifier(),
+                'dimensionSpacePoint' => $virtualVariant->getDimensionSpacePoint()
+            ]);
+
+            $this->logger->log(
+                sprintf(
+                    'NodeIndexer: Added / updated node %s. ID: %s Context: %s',
+                    $serializedVariant,
+                    $virtualVariant->getCacheEntryIdentifier(),
+                    json_encode($nodeAdapter->getContext()->getProperties())
+                ),
+                LOG_DEBUG,
+                null,
+                'ElasticSearch (CR)'
+            );
+        }
     }
 
     protected function collectOccupiedDimensionSpacePointsForFulltextRoot(Node $currentNode, DimensionSpacePointSet $dimensionSpacePoints): DimensionSpacePointSet
@@ -286,7 +283,10 @@ class NodeIndexer extends AbstractNodeIndexer
         }
 
         foreach ($currentNode->getOutgoingHierarchyRelations() as $outgoingHierarchyRelation) {
-            $dimensionSpacePoints = $this->collectOccupiedDimensionSpacePointsForFulltextRoot($outgoingHierarchyRelation->getChild(), $dimensionSpacePoints);
+            $childNode = $outgoingHierarchyRelation->getChild();
+            if (!IsFulltextRoot::isSatisfiedBy($childNode)) {
+                $dimensionSpacePoints = $this->collectOccupiedDimensionSpacePointsForFulltextRoot($outgoingHierarchyRelation->getChild(), $dimensionSpacePoints);
+            }
         }
 
         return $dimensionSpacePoints;
@@ -306,7 +306,7 @@ class NodeIndexer extends AbstractNodeIndexer
         }
 
         // TODO: handle deletion from the fulltext index as well
-        $identifier = sha1($node->getContextPath());
+        $identifier = (string)DocumentIdentifier::fromLegacyNode($node);
 
         $this->currentBulkRequest[] = [
             [
