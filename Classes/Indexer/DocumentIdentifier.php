@@ -34,7 +34,7 @@ final class DocumentIdentifier
      */
     protected $coveredDimensionSpacePoint;
 
-    private function __construct(
+    public function __construct(
         ContentRepository\ContentStream\ContentStreamIdentifier $contentStreamIdentifier,
         ContentRepository\NodeAggregate\NodeAggregateIdentifier $nodeAggregateIdentifier,
         DimensionSpacePoint $coveredDimensionSpacePoint

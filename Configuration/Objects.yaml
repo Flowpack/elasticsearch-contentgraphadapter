@@ -6,3 +6,13 @@ Neos\ContentRepository\Search\Indexer\NodeIndexerInterface:
 
 Neos\ContentRepository\DimensionSpace\Dimension\ContentDimensionSourceInterface:
   className: Neos\ContentRepository\InMemoryGraph\Dimension\LegacyConfigurationAndWorkspaceBasedContentDimensionSource
+
+Neos\ContentRepository\DimensionSpace\DimensionSpace\ContentDimensionZookeeper:
+  arguments:
+    1:
+      object: Neos\ContentRepository\InMemoryGraph\Dimension\LegacyConfigurationAndWorkspaceBasedContentDimensionSource
+
+Neos\ContentRepository\DimensionSpace\DimensionSpace\InterDimensionalVariationGraph:
+  arguments:
+    1:
+      object: Neos\ContentRepository\InMemoryGraph\Dimension\LegacyConfigurationAndWorkspaceBasedContentDimensionSource

@@ -21,6 +21,7 @@ use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Driver\RequestDriverInterfac
 use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Driver\SystemDriverInterface;
 use Flowpack\ElasticSearch\Domain\Model\Document as ElasticSearchDocument;
 use Flowpack\ElasticSearch\Domain\Model\Index;
+use Neos\ContentRepository\DimensionSpace\Dimension\ContentDimensionIdentifier;
 use Neos\ContentRepository\DimensionSpace\DimensionSpace\DimensionSpacePointSet;
 use Neos\ContentRepository\Domain\ContentStream\ContentStreamIdentifier;
 use Neos\ContentRepository\InMemoryGraph\ContentSubgraph\ContentGraph;
@@ -193,21 +194,23 @@ class NodeIndexer extends AbstractNodeIndexer
         $this->contentGraph = $contentGraph;
     }
 
-    public function indexGraphNode(TraversableNode $traversableNode): void
+    public function indexGraphNode(Node $dataNode): void
     {
-        $occupiedDimensionSpacePoints = new DimensionSpacePointSet([$traversableNode->getOriginDimensionSpacePoint()]);
-        $isFulltextRoot = IsFulltextRoot::isSatisfiedBy($traversableNode);
+        $occupiedDimensionSpacePoints = new DimensionSpacePointSet([$dataNode->getOriginDimensionSpacePoint()]);
+        $isFulltextRoot = IsFulltextRoot::isSatisfiedBy($dataNode);
         if ($isFulltextRoot) {
-            $occupiedDimensionSpacePoints = $this->collectOccupiedDimensionSpacePointsForFulltextRoot($traversableNode->getDataNode(), $occupiedDimensionSpacePoints);
+            $occupiedDimensionSpacePoints = $this->collectOccupiedDimensionSpacePointsForFulltextRoot($dataNode, $occupiedDimensionSpacePoints);
         }
 
-        $dataNode = $traversableNode->getDataNode();
-        $mappingType = $this->getIndex()->findType($this->nodeTypeMappingBuilder->convertNodeTypeNameToMappingName($traversableNode->getNodeType()));
+        $mappingType = $this->getIndex()->findType($this->nodeTypeMappingBuilder->convertNodeTypeNameToMappingName($dataNode->getNodeType()));
         foreach ($occupiedDimensionSpacePoints as $occupiedDimensionSpacePoint) {
             $matchingSubgraph = $this->contentGraph->getSubgraphByIdentifier(
-                ContentStreamIdentifier::fromString($occupiedDimensionSpacePoint->getCoordinate(LegacyConfigurationAndWorkspaceBasedContentDimensionSource::WORKSPACE_DIMENSION_IDENTIFIER)),
+                ContentStreamIdentifier::fromString($occupiedDimensionSpacePoint->getCoordinate(new ContentDimensionIdentifier(LegacyConfigurationAndWorkspaceBasedContentDimensionSource::WORKSPACE_DIMENSION_IDENTIFIER))),
                 $occupiedDimensionSpacePoint
             );
+            if (!$matchingSubgraph) {
+                continue;
+            }
             $virtualVariant = new TraversableNode($dataNode, $matchingSubgraph);
             $nodeAdapter = new LegacyNodeAdapter($virtualVariant);
             $fulltextIndexOfNode = [];

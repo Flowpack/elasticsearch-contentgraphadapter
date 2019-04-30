@@ -12,9 +12,12 @@ namespace Flowpack\ElasticSearch\ContentGraphAdapter\Command;
  * source code.
  */
 use Flowpack\ElasticSearch\ContentGraphAdapter\Indexer\NodeIndexer;
-use Flowpack\ElasticSearch\ContentGraphAdapter\Mapping\NodeTypeMappingBuilder;
+use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Driver\NodeTypeMappingBuilderInterface;
+use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Exception as CRAException;
 use Flowpack\ElasticSearch\ContentRepositoryAdaptor\LoggerInterface;
+use Flowpack\ElasticSearch\Domain\Model\Mapping;
 use Flowpack\ElasticSearch\Transfer\Exception\ApiException;
+use Neos\ContentRepository\InMemoryGraph\ContentSubgraph\TraversableNode;
 use Neos\Flow\Configuration\ConfigurationManager;
 use Neos\Flow\ObjectManagement\ObjectManagerInterface;
 use Neos\ContentRepository\InMemoryGraph\ContentSubgraph\GraphService;
@@ -43,7 +46,7 @@ class GraphIndexCommandController extends CommandController
 
     /**
      * @Flow\Inject
-     * @var NodeTypeMappingBuilder
+     * @var NodeTypeMappingBuilderInterface
      */
     protected $nodeTypeMappingBuilder;
 
@@ -73,7 +76,8 @@ class GraphIndexCommandController extends CommandController
     public function initializeObject($cause)
     {
         if ($cause === ObjectManagerInterface::INITIALIZATIONCAUSE_CREATED) {
-            $this->settings = $this->configurationManager->getConfiguration(ConfigurationManager::CONFIGURATION_TYPE_SETTINGS, 'Neos.ContentRepository.Search');
+            $this->settings = $this->configurationManager->getConfiguration(ConfigurationManager::CONFIGURATION_TYPE_SETTINGS,
+                'Neos.ContentRepository.Search');
         }
     }
 
@@ -91,28 +95,13 @@ class GraphIndexCommandController extends CommandController
      * @throws \Flowpack\ElasticSearch\ContentRepositoryAdaptor\Exception
      * @throws \Neos\ContentRepository\Exception\NodeTypeNotFoundException
      */
-    public function buildCommand($limit = null, $update = false, $workspace = null, $postfix = null): void
+    public function buildCommand($limit = null, $update = false, $workspace = null, $postfix = ''): void
     {
-        if ($update === true) {
-            $this->logger->log('!!! Update Mode (Development) active!', LOG_INFO);
-        } else {
-            $this->nodeIndexer->setIndexNamePostfix($postfix ?: time());
-            if ($this->nodeIndexer->getIndex()->exists() === true) {
-                $this->logger->log(sprintf('Deleted index with the same postfix (%s)!', $postfix), LOG_WARNING);
-                $this->nodeIndexer->getIndex()->delete();
-            }
-            $this->nodeIndexer->getIndex()->create();
-            $this->logger->log('Created index ' . $this->nodeIndexer->getIndexName(), LOG_INFO);
+        $this->createNewIndex($postfix);
+        $this->applyMapping();
 
-            $nodeTypeMappingCollection = $this->nodeTypeMappingBuilder->buildMappingInformation($this->nodeIndexer->getIndex());
-            foreach ($nodeTypeMappingCollection as $mapping) {
-                /** @var \Flowpack\ElasticSearch\Domain\Model\Mapping $mapping */
-                $mapping->apply();
-            }
-            $this->logger->log('Updated Mapping.', LOG_INFO);
-        }
-
-        $this->logger->log(sprintf('Indexing %snodes ... ', ($limit !== null ? 'the first ' . $limit . ' ' : '')), LOG_INFO);
+        $this->logger->log(sprintf('Indexing %snodes ... ', ($limit !== null ? 'the first ' . $limit . ' ' : '')),
+            LOG_INFO);
 
         $this->outputLine('Initializing content graph...');
         $graph = $this->graphService->getContentGraph($this->output);
@@ -165,8 +154,41 @@ class GraphIndexCommandController extends CommandController
             }
         } catch (ApiException $exception) {
             $response = json_decode($exception->getResponse());
-            var_dump($response->status, $response->error);
-            $this->logger->log(sprintf('Nothing removed. ElasticSearch responded with status %s, saying "%s"', $response->status, $response->error));
+            $this->logger->log(sprintf('Nothing removed. ElasticSearch responded with status %s, saying "%s"',
+                $response->status, $response->error));
         }
+    }
+
+    /**
+     * Create a new index with the given $postfix.
+     *
+     * @param string $postfix
+     * @return void
+     * @throws CRAException
+     */
+    protected function createNewIndex(string $postfix): void
+    {
+        $this->nodeIndexer->setIndexNamePostfix($postfix ?: (string)time());
+        if ($this->nodeIndexer->getIndex()->exists() === true) {
+            $this->logger->log(sprintf('Deleted index with the same postfix (%s)!', $postfix), LOG_WARNING);
+            $this->nodeIndexer->getIndex()->delete();
+        }
+        $this->nodeIndexer->getIndex()->create();
+    }
+
+    /**
+     * Apply the mapping to the current index.
+     *
+     * @return void
+     * @throws CRAException
+     */
+    protected function applyMapping(): void
+    {
+        $nodeTypeMappingCollection = $this->nodeTypeMappingBuilder->buildMappingInformation($this->nodeIndexer->getIndex());
+        foreach ($nodeTypeMappingCollection as $mapping) {
+            /** @var Mapping $mapping */
+            $mapping->apply();
+        }
+        $this->logger->log('Updated Mapping.');
     }
 }

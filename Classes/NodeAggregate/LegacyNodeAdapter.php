@@ -9,14 +9,18 @@ namespace Flowpack\ElasticSearch\ContentGraphAdapter\NodeAggregate;
  */
 
 use Neos\ContentRepository\DimensionSpace\Dimension\ContentDimensionIdentifier;
+use Neos\ContentRepository\DimensionSpace\DimensionSpace\DimensionSpacePoint;
 use Neos\ContentRepository\Domain as ContentRepository;
+use Neos\ContentRepository\Domain\ContentStream\ContentStreamIdentifier;
 use Neos\ContentRepository\Domain\ContentSubgraph\NodePath;
 use Neos\ContentRepository\Domain\Model\NodeInterface;
 use Neos\ContentRepository\Domain\Model\NodeTemplate;
 use Neos\ContentRepository\Domain\Model\NodeType;
 use Neos\ContentRepository\Domain\Model\Workspace;
+use Neos\ContentRepository\Domain\NodeAggregate\NodeAggregateIdentifier;
 use Neos\ContentRepository\Domain\NodeAggregate\NodeName;
 use Neos\ContentRepository\Domain\NodeType\NodeTypeConstraints;
+use Neos\ContentRepository\Domain\NodeType\NodeTypeName;
 use Neos\ContentRepository\Domain\Projection\Content\PropertyCollectionInterface;
 use Neos\ContentRepository\Domain\Utility\NodePaths;
 use Neos\ContentRepository\InMemoryGraph\ContentSubgraph\TraversableNode;
@@ -26,7 +30,7 @@ use Neos\Flow\Annotations as Flow;
 /**
  * The traversable read only node implementation
  */
-final class LegacyNodeAdapter implements ContentRepository\Model\NodeInterface
+final class LegacyNodeAdapter implements ContentRepository\Model\NodeInterface, ContentRepository\Projection\Content\NodeInterface
 {
     /**
      * @Flow\Inject
@@ -208,8 +212,11 @@ final class LegacyNodeAdapter implements ContentRepository\Model\NodeInterface
         return $this->node->getIndex();
     }
 
-    public function getParent(): NodeInterface
+    public function getParent(): ?NodeInterface
     {
+        if ($this->node->isRoot()) {
+            return null;
+        }
         return new LegacyNodeAdapter($this->node->findParentNode());
     }
 
@@ -376,5 +383,62 @@ final class LegacyNodeAdapter implements ContentRepository\Model\NodeInterface
     private function handleLegacyOperation(): void
     {
         throw new LegacyOperationIsUnsupported('Legacy operation "' . __METHOD__ . ' is not supported', 1556029877);
+    }
+
+    /**
+     * Returns a string which distinctly identifies this object and thus can be used as an identifier for cache entries
+     * related to this object.
+     *
+     * @return string
+     */
+    public function getCacheEntryIdentifier(): string
+    {
+        return $this->node->getCacheEntryIdentifier();
+    }
+
+    /**
+     * Whether or not this node is the root of the graph, i.e. has no parent node
+     *
+     * @return bool
+     */
+    public function isRoot(): bool
+    {
+        return $this->node->isRoot();
+    }
+
+    public function isTethered(): bool
+    {
+        return $this->node->isTethered();
+    }
+
+    public function getContentStreamIdentifier(): ContentStreamIdentifier
+    {
+        return $this->node->getContentStreamIdentifier();
+    }
+
+    public function getNodeAggregateIdentifier(): NodeAggregateIdentifier
+    {
+        return $this->node->getNodeAggregateIdentifier();
+    }
+
+    public function getNodeTypeName(): NodeTypeName
+    {
+        return $this->node->getNodeTypeName();
+    }
+
+    public function getNodeName(): ?NodeName
+    {
+        return $this->node->getNodeName();
+    }
+
+    /**
+     * returns the DimensionSpacePoint the node is at home in. Usually needed to address a Node in a NodeAggregate
+     * in order to update it.
+     *
+     * @return DimensionSpacePoint
+     */
+    public function getOriginDimensionSpacePoint(): DimensionSpacePoint
+    {
+        return $this->node->getOriginDimensionSpacePoint();
     }
 }
