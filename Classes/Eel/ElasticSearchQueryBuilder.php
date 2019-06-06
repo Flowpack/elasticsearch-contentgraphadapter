@@ -130,7 +130,7 @@ class ElasticSearchQueryBuilder extends ElasticSearchQuery
             foreach (array_keys($this->securityContext->getRoles()) as $roleName) {
                 $edgeFilter['query']['bool']['should'][] = [
                     'term' => [
-                        '__edges.accessRoles' => $roleName
+                        '__hierarchyRelations.accessRoles' => $roleName
                     ],
                 ];
             }

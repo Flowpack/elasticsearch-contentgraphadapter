@@ -22,15 +22,19 @@ use Neos\ContentRepository\Domain\NodeAggregate\NodeName;
 use Neos\ContentRepository\Domain\NodeType\NodeTypeConstraints;
 use Neos\ContentRepository\Domain\NodeType\NodeTypeName;
 use Neos\ContentRepository\Domain\Projection\Content\PropertyCollectionInterface;
+use Neos\ContentRepository\Domain\Projection\Content\TraversableNodeInterface;
+use Neos\ContentRepository\Domain\Projection\Content\TraversableNodes;
 use Neos\ContentRepository\Domain\Utility\NodePaths;
+use Neos\ContentRepository\Exception\NodeException;
 use Neos\ContentRepository\InMemoryGraph\ContentSubgraph\TraversableNode;
 use Neos\ContentRepository\InMemoryGraph\Dimension\LegacyConfigurationAndWorkspaceBasedContentDimensionSource;
+use Neos\EventSourcedContentRepository\Domain\ValueObject\PropertyName;
 use Neos\Flow\Annotations as Flow;
 
 /**
  * The traversable read only node implementation
  */
-final class LegacyNodeAdapter implements ContentRepository\Model\NodeInterface, ContentRepository\Projection\Content\NodeInterface
+final class LegacyNodeAdapter implements ContentRepository\Model\NodeInterface, ContentRepository\Projection\Content\NodeInterface, ContentRepository\Projection\Content\TraversableNodeInterface
 {
     /**
      * @Flow\Inject
@@ -440,5 +444,63 @@ final class LegacyNodeAdapter implements ContentRepository\Model\NodeInterface, 
     public function getOriginDimensionSpacePoint(): DimensionSpacePoint
     {
         return $this->node->getOriginDimensionSpacePoint();
+    }
+
+    public function getDimensionSpacePoint(): DimensionSpacePoint
+    {
+        return $this->node->getDimensionSpacePoint();
+    }
+
+    public function findParentNode(): TraversableNodeInterface
+    {
+        return $this->node->findParentNode();
+    }
+
+    public function findNodePath(): NodePath
+    {
+        return $this->node->findNodePath();
+    }
+
+    public function findNamedChildNode(NodeName $nodeName): TraversableNodeInterface
+    {
+        return $this->node->findNamedChildNode($nodeName);
+    }
+
+    public function findChildNodes(
+        NodeTypeConstraints $nodeTypeConstraints = null,
+        int $limit = null,
+        int $offset = null
+    ): TraversableNodes {
+        return $this->node->findChildNodes($nodeTypeConstraints, $limit, $offset);
+    }
+
+    public function countChildNodes(NodeTypeConstraints $nodeTypeConstraints = null): int
+    {
+        return $this->node->countChildNodes($nodeTypeConstraints);
+    }
+
+    public function findReferencedNodes(): TraversableNodes
+    {
+        return $this->node->findReferencedNodes();
+    }
+
+    public function findNamedReferencedNodes(PropertyName $edgeName): TraversableNodes
+    {
+        return $this->node->findNamedReferencedNodes($edgeName);
+    }
+
+    public function findReferencingNodes(): TraversableNodes
+    {
+        return $this->node->findReferencingNodes();
+    }
+
+    public function findNamedReferencingNodes(PropertyName $nodeName): TraversableNodes
+    {
+        return $this->node->findNamedReferencingNodes($nodeName);
+    }
+
+    public function equals(TraversableNodeInterface $other): bool
+    {
+        return $this->node->equals($other);
     }
 }

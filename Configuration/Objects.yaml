@@ -1,6 +1,9 @@
 Neos\ContentRepository\Search\Search\QueryBuilderInterface:
   className: Flowpack\ElasticSearch\ContentGraphAdapter\Eel\ElasticSearchQueryBuilder
 
+Flowpack\ElasticSearch\ContentRepositoryAdaptor\Driver\NodeTypeMappingBuilderInterface:
+  className: Flowpack\ElasticSearch\ContentGraphAdapter\Mapping\NodeTypeMappingBuilder
+
 Neos\ContentRepository\Search\Indexer\NodeIndexerInterface:
   className: Flowpack\ElasticSearch\ContentGraphAdapter\Indexer\NodeIndexer
 

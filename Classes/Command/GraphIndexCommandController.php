@@ -12,12 +12,11 @@ namespace Flowpack\ElasticSearch\ContentGraphAdapter\Command;
  * source code.
  */
 use Flowpack\ElasticSearch\ContentGraphAdapter\Indexer\NodeIndexer;
-use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Driver\NodeTypeMappingBuilderInterface;
+use Flowpack\ElasticSearch\ContentGraphAdapter\Mapping\NodeTypeMappingBuilder;
 use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Exception as CRAException;
 use Flowpack\ElasticSearch\ContentRepositoryAdaptor\LoggerInterface;
 use Flowpack\ElasticSearch\Domain\Model\Mapping;
 use Flowpack\ElasticSearch\Transfer\Exception\ApiException;
-use Neos\ContentRepository\InMemoryGraph\ContentSubgraph\TraversableNode;
 use Neos\Flow\Configuration\ConfigurationManager;
 use Neos\Flow\ObjectManagement\ObjectManagerInterface;
 use Neos\ContentRepository\InMemoryGraph\ContentSubgraph\GraphService;
@@ -46,7 +45,7 @@ class GraphIndexCommandController extends CommandController
 
     /**
      * @Flow\Inject
-     * @var NodeTypeMappingBuilderInterface
+     * @var NodeTypeMappingBuilder
      */
     protected $nodeTypeMappingBuilder;
 

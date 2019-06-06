@@ -221,7 +221,7 @@ class NodeIndexer extends AbstractNodeIndexer
             $document = new ElasticSearchDocument(
                 $mappingType,
                 $nodePropertiesToBeStoredInIndex,
-                (string)DocumentIdentifier::fromTraversableNode($virtualVariant)
+                sha1($nodeAdapter->getContextPath())
             );
             $documentData = $document->getData();
             $documentData['__sortIndex'] = [];

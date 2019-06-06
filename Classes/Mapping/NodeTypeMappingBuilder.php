@@ -14,6 +14,7 @@ namespace Flowpack\ElasticSearch\ContentGraphAdapter\Mapping;
 use Flowpack\ElasticSearch\Domain\Model\Index;
 use Flowpack\ElasticSearch\Domain\Model\Mapping;
 use Flowpack\ElasticSearch\Mapping\MappingCollection;
+use Neos\Error\Messages\Warning;
 use Neos\Flow\Annotations as Flow;
 use Neos\ContentRepository\Domain\Model\NodeType;
 use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Driver\Version5\Mapping as FlowpackMapping;
@@ -54,23 +55,23 @@ class NodeTypeMappingBuilder extends FlowpackMapping\NodeTypeMappingBuilder
             // 'not_analyzed' is necessary
             $mapping->addDynamicTemplate('dimensions', [
                 'path_match' => '__dimensionCombinations.*',
-                'match_mapping_type' => 'string',
+                'match_mapping_type' => 'keyword',
                 'mapping' => [
-                    'type' => 'string',
+                    'type' => 'keyword',
                     'index' => 'not_analyzed'
                 ]
             ]);
             $mapping->setPropertyByPath('__dimensionCombinationHash', [
-                'type' => 'string',
+                'type' => 'keyword',
                 'index' => 'not_analyzed'
             ]);
 
-            $mapping->setPropertyByPath('__edges', [
+            $mapping->setPropertyByPath('__hierarchyRelations', [
                 'type' => 'nested',
                 'include_in_all' => false,
                 'properties' => [
-                    'tree' => [
-                        'type' => 'string',
+                    'subgraph' => [
+                        'type' => 'keyword',
                         'include_in_all' => false,
                         'index' => 'not_analyzed',
                     ],
@@ -78,7 +79,7 @@ class NodeTypeMappingBuilder extends FlowpackMapping\NodeTypeMappingBuilder
                         'type' => 'integer'
                     ],
                     'accessRoles' => [
-                        'type' => 'string',
+                        'type' => 'keyword',
                         'include_in_all' => false,
                         'index' => 'not_analyzed',
                     ],
@@ -104,12 +105,12 @@ class NodeTypeMappingBuilder extends FlowpackMapping\NodeTypeMappingBuilder
                 'include_in_all' => false,
                 'properties' => [
                     'source' => [
-                        'type' => 'string',
+                        'type' => 'keyword',
                         'include_in_all' => false,
                         'index' => 'not_analyzed',
                     ],
                     'name' => [
-                        'type' => 'string',
+                        'type' => 'keyword',
                         'include_in_all' => false,
                         'index' => 'not_analyzed',
                     ]
@@ -121,12 +122,12 @@ class NodeTypeMappingBuilder extends FlowpackMapping\NodeTypeMappingBuilder
                 'include_in_all' => false,
                 'properties' => [
                     'target' => [
-                        'type' => 'string',
+                        'type' => 'keyword',
                         'include_in_all' => false,
                         'index' => 'not_analyzed',
                     ],
                     'name' => [
-                        'type' => 'string',
+                        'type' => 'keyword',
                         'include_in_all' => false,
                         'index' => 'not_analyzed',
                     ],
@@ -137,16 +138,18 @@ class NodeTypeMappingBuilder extends FlowpackMapping\NodeTypeMappingBuilder
             ]);
 
             foreach ($nodeType->getProperties() as $propertyName => $propertyConfiguration) {
-                if (isset($propertyConfiguration['search']) && isset($propertyConfiguration['search']['elasticSearchMapping'])) {
+                if (isset($propertyConfiguration['search']['elasticSearchMapping'])) {
                     if (is_array($propertyConfiguration['search']['elasticSearchMapping'])) {
-                        $mapping->setPropertyByPath($propertyName, $propertyConfiguration['search']['elasticSearchMapping']);
+                        $propertyMapping = $propertyConfiguration['search']['elasticSearchMapping'];
+                        $this->migrateConfigurationForElasticVersion5($propertyMapping);
+                        $mapping->setPropertyByPath($propertyName, $propertyMapping);
                     }
-                } elseif (isset($propertyConfiguration['type']) && isset($this->defaultConfigurationPerType[$propertyConfiguration['type']]['elasticSearchMapping'])) {
+                } elseif (isset($propertyConfiguration['type'], $this->defaultConfigurationPerType[$propertyConfiguration['type']]['elasticSearchMapping'])) {
                     if (is_array($this->defaultConfigurationPerType[$propertyConfiguration['type']]['elasticSearchMapping'])) {
                         $mapping->setPropertyByPath($propertyName, $this->defaultConfigurationPerType[$propertyConfiguration['type']]['elasticSearchMapping']);
                     }
                 } else {
-                    $this->lastMappingErrors->addWarning(new \Neos\Error\Messages\Warning('Node Type "' . $nodeTypeName . '" - property "' . $propertyName . '": No ElasticSearch Mapping found.'));
+                    $this->lastMappingErrors->addWarning(new Warning('Node Type "' . $nodeTypeName . '" - property "' . $propertyName . '": No ElasticSearch Mapping found.'));
                 }
             }
 
