@@ -68,6 +68,12 @@ class GraphIndexCommandController extends CommandController
     protected $graphService;
 
     /**
+     * @Flow\InjectConfiguration(path="indexing.batchSize")
+     * @var int
+     */
+    protected $batchSize;
+
+    /**
      * @var array
      */
     protected $settings;
@@ -116,7 +122,7 @@ class GraphIndexCommandController extends CommandController
             $nodesSinceLastFlush++;
             $indexedHierarchyRelations += count($node->getIncomingHierarchyRelations());
             $this->output->progressAdvance();
-            if ($nodesSinceLastFlush >= 100) {
+            if ($nodesSinceLastFlush >= $this->batchSize) {
                 $this->nodeIndexer->flush();
                 $nodesSinceLastFlush = 0;
             }

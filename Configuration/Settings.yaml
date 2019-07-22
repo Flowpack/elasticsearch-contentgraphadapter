@@ -3,3 +3,9 @@ Neos:
     Search:
       defaultContext:
         Indexing: Flowpack\ElasticSearch\ContentGraphAdapter\Eel\IndexingHelper
+
+Flowpack:
+  ElasticSearch:
+    ContentGraphAdapter:
+      indexing:
+        batchSize: 100
