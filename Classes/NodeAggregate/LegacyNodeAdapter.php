@@ -47,7 +47,7 @@ final class LegacyNodeAdapter implements ContentRepository\Model\NodeInterface, 
      */
     protected $node;
 
-    public function __construct(TraversableNode $node)
+    public function __construct(TraversableNodeInterface $node)
     {
         $this->node = $node;
     }
@@ -221,7 +221,12 @@ final class LegacyNodeAdapter implements ContentRepository\Model\NodeInterface, 
         if ($this->node->isRoot()) {
             return null;
         }
-        return new LegacyNodeAdapter($this->node->findParentNode());
+
+        try {
+            return new LegacyNodeAdapter($this->node->findParentNode());
+        } catch (NodeException $exception) {
+            return null;
+        }
     }
 
     public function getParentPath()
@@ -451,6 +456,10 @@ final class LegacyNodeAdapter implements ContentRepository\Model\NodeInterface, 
         return $this->node->getDimensionSpacePoint();
     }
 
+    /**
+     * @return TraversableNodeInterface
+     * @throws NodeException
+     */
     public function findParentNode(): TraversableNodeInterface
     {
         return $this->node->findParentNode();
