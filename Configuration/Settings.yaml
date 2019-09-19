@@ -9,3 +9,4 @@ Flowpack:
     ContentGraphAdapter:
       indexing:
         batchSize: 100
+        displayProgress: false

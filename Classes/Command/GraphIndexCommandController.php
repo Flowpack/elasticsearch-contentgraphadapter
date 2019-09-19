@@ -74,6 +74,12 @@ class GraphIndexCommandController extends CommandController
     protected $batchSize;
 
     /**
+     * @Flow\InjectConfiguration(path="indexing.displayProgress")
+     * @var bool
+     */
+    protected $displayProgress;
+
+    /**
      * @var array
      */
     protected $settings;
@@ -95,13 +101,14 @@ class GraphIndexCommandController extends CommandController
      * @param boolean $update if TRUE, do not throw away the index at the start. Should *only be used for development*.
      * @param string $workspace name of the workspace which should be indexed
      * @param string $postfix Index postfix, index with the same postifix will be deleted if exist
+     * @param bool $displayProgress
      * @return void
      * @throws ApiException
-     * @throws \Flowpack\ElasticSearch\ContentRepositoryAdaptor\Exception
-     * @throws \Neos\ContentRepository\Exception\NodeTypeNotFoundException
+     * @throws CRAException
      */
-    public function buildCommand($limit = null, $update = false, $workspace = null, $postfix = ''): void
+    public function buildCommand($limit = null, $update = false, $workspace = null, $postfix = '', bool $displayProgress = false): void
     {
+        $displayProgress = $displayProgress || $this->displayProgress;
         $this->createNewIndex($postfix);
         $this->applyMapping();
 
@@ -109,11 +116,17 @@ class GraphIndexCommandController extends CommandController
             LOG_INFO);
 
         $this->outputLine('Initializing content graph...');
-        $graph = $this->graphService->getContentGraph($this->output);
+        if ($displayProgress) {
+            $graph = $this->graphService->getContentGraph($this->output);
+        } else {
+            $graph = $this->graphService->getContentGraph();
+        }
 
         $this->outputLine('Indexing content graph...');
         $time = time();
-        $this->output->progressStart(count($graph->getNodes()));
+        if ($displayProgress) {
+            $this->output->progressStart(count($graph->getNodes()));
+        }
         $indexedHierarchyRelations = 0;
         $nodesSinceLastFlush = 0;
         $this->nodeIndexer->setContentGraph($graph);
@@ -121,14 +134,18 @@ class GraphIndexCommandController extends CommandController
             $this->nodeIndexer->indexGraphNode($node);
             $nodesSinceLastFlush++;
             $indexedHierarchyRelations += count($node->getIncomingHierarchyRelations());
-            $this->output->progressAdvance();
+            if ($displayProgress) {
+                $this->output->progressAdvance();
+            }
             if ($nodesSinceLastFlush >= $this->batchSize) {
                 $this->nodeIndexer->flush();
                 $nodesSinceLastFlush = 0;
             }
         }
         $this->output->progressFinish();
-        $this->nodeIndexer->flush();
+        if ($displayProgress) {
+            $this->nodeIndexer->flush();
+        }
         $timeSpent = time() - $time;
         $this->logger->log('Done. Indexed ' . count($graph->getNodes()) . ' nodes and ' . $indexedHierarchyRelations . ' edges in ' . $timeSpent . ' s at ' . round(count($graph->getNodes()) / $timeSpent) . ' nodes/s (' . round($indexedHierarchyRelations / $timeSpent) . ' edges/s)',
             LOG_INFO);
