@@ -14,7 +14,7 @@ namespace Flowpack\ElasticSearch\ContentGraphAdapter\Command;
 use Flowpack\ElasticSearch\ContentGraphAdapter\Indexer\NodeIndexer;
 use Flowpack\ElasticSearch\ContentGraphAdapter\Mapping\NodeTypeMappingBuilder;
 use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Exception as CRAException;
-use Flowpack\ElasticSearch\ContentRepositoryAdaptor\LoggerInterface;
+use Psr\Log\LoggerInterface;
 use Flowpack\ElasticSearch\Domain\Model\Mapping;
 use Flowpack\ElasticSearch\Transfer\Exception\ApiException;
 use Neos\Flow\Configuration\ConfigurationManager;
@@ -112,8 +112,7 @@ class GraphIndexCommandController extends CommandController
         $this->createNewIndex($postfix);
         $this->applyMapping();
 
-        $this->logger->log(sprintf('Indexing %snodes ... ', ($limit !== null ? 'the first ' . $limit . ' ' : '')),
-            LOG_INFO);
+        $this->logger->info(sprintf('Indexing %snodes ... ', ($limit !== null ? 'the first ' . $limit . ' ' : '')));
 
         $this->outputLine('Initializing content graph...');
         if ($displayProgress) {
@@ -147,8 +146,7 @@ class GraphIndexCommandController extends CommandController
             $this->nodeIndexer->flush();
         }
         $timeSpent = time() - $time;
-        $this->logger->log('Done. Indexed ' . count($graph->getNodes()) . ' nodes and ' . $indexedHierarchyRelations . ' edges in ' . $timeSpent . ' s at ' . round(count($graph->getNodes()) / $timeSpent) . ' nodes/s (' . round($indexedHierarchyRelations / $timeSpent) . ' edges/s)',
-            LOG_INFO);
+        $this->logger->info('Done. Indexed ' . count($graph->getNodes()) . ' nodes and ' . $indexedHierarchyRelations . ' edges in ' . $timeSpent . ' s at ' . round(count($graph->getNodes()) / $timeSpent) . ' nodes/s (' . round($indexedHierarchyRelations / $timeSpent) . ' edges/s)');
         $this->nodeIndexer->getIndex()->refresh();
 
         // TODO: smoke tests
@@ -169,14 +167,14 @@ class GraphIndexCommandController extends CommandController
             $indicesToBeRemoved = $this->nodeIndexer->removeOldIndices();
             if (count($indicesToBeRemoved) > 0) {
                 foreach ($indicesToBeRemoved as $indexToBeRemoved) {
-                    $this->logger->log('Removing old index ' . $indexToBeRemoved);
+                    $this->logger->info('Removing old index ' . $indexToBeRemoved);
                 }
             } else {
-                $this->logger->log('Nothing to remove.');
+                $this->logger->info('Nothing to remove.');
             }
         } catch (ApiException $exception) {
             $response = json_decode($exception->getResponse());
-            $this->logger->log(sprintf('Nothing removed. ElasticSearch responded with status %s, saying "%s"',
+            $this->logger->error(sprintf('Nothing removed. ElasticSearch responded with status %s, saying "%s"',
                 $response->status, $response->error));
         }
     }
@@ -192,7 +190,7 @@ class GraphIndexCommandController extends CommandController
     {
         $this->nodeIndexer->setIndexNamePostfix($postfix ?: (string)time());
         if ($this->nodeIndexer->getIndex()->exists() === true) {
-            $this->logger->log(sprintf('Deleted index with the same postfix (%s)!', $postfix), LOG_WARNING);
+            $this->logger->warning(sprintf('Deleted index with the same postfix (%s)!', $postfix));
             $this->nodeIndexer->getIndex()->delete();
         }
         $this->nodeIndexer->getIndex()->create();
@@ -211,6 +209,6 @@ class GraphIndexCommandController extends CommandController
             /** @var Mapping $mapping */
             $mapping->apply();
         }
-        $this->logger->log('Updated Mapping.');
+        $this->logger->info('Updated Mapping.');
     }
 }

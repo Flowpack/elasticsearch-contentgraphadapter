@@ -445,9 +445,9 @@ final class LegacyNodeAdapter implements ContentRepository\Model\NodeInterface, 
      * returns the DimensionSpacePoint the node is at home in. Usually needed to address a Node in a NodeAggregate
      * in order to update it.
      *
-     * @return DimensionSpacePoint
+     * @return OriginDimensionSpacePoint
      */
-    public function getOriginDimensionSpacePoint(): DimensionSpacePoint
+    public function getOriginDimensionSpacePoint(): OriginDimensionSpacePoint
     {
         return $this->node->getOriginDimensionSpacePoint();
     }
