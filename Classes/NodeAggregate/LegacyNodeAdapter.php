@@ -212,7 +212,7 @@ final class LegacyNodeAdapter implements ContentRepository\Model\NodeInterface, 
         $this->handleLegacyOperation();
     }
 
-    public function getIndex(): int
+    public function getIndex(): ?int
     {
         return $this->node->getIndex();
     }
@@ -512,5 +512,10 @@ final class LegacyNodeAdapter implements ContentRepository\Model\NodeInterface, 
     public function equals(TraversableNodeInterface $other): bool
     {
         return $this->node->equals($other);
+    }
+
+    public function __toString(): string
+    {
+        return 'Node ' . $this->getContextPath() . '[' . $this->getNodeType()->getName() . ']';
     }
 }

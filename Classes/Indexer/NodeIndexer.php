@@ -204,7 +204,7 @@ class NodeIndexer extends AbstractNodeIndexer
             $occupiedDimensionSpacePoints = $this->collectOccupiedDimensionSpacePointsForFulltextRoot($dataNode, $occupiedDimensionSpacePoints);
         }
 
-        $mappingType = $this->getIndex()->findType($this->nodeTypeMappingBuilder->convertNodeTypeNameToMappingName($dataNode->getNodeType()));
+        $mappingType = $this->getIndex()->findType($dataNode->getNodeType()->getName());
         foreach ($occupiedDimensionSpacePoints as $occupiedDimensionSpacePoint) {
             $matchingSubgraph = $this->contentGraph->getSubgraphByIdentifier(
                 ContentStreamIdentifier::fromString($occupiedDimensionSpacePoint->getCoordinate(new ContentDimensionIdentifier(LegacyConfigurationAndWorkspaceBasedContentDimensionSource::WORKSPACE_DIMENSION_IDENTIFIER))),
@@ -360,7 +360,7 @@ class NodeIndexer extends AbstractNodeIndexer
             $response = $this->requestDriver->bulk($this->getIndex(), $content);
             foreach ($response as $responseLine) {
                 if (isset($response['errors']) && $response['errors'] !== false) {
-                    $this->logger->error('Indexing Error: Error during bulk request - ' . $responseLine);
+                    $this->logger->error('Indexing Error: Error during bulk request - ' . json_encode($responseLine));
                 }
             }
         }
