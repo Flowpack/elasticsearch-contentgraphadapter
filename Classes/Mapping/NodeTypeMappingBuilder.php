@@ -51,24 +51,8 @@ class NodeTypeMappingBuilder extends FlowpackMapping\NodeTypeMappingBuilder
                 $mapping->setFullMapping($fullConfiguration['search']['elasticSearchMapping']);
             }
 
-            // http://www.elasticsearch.org/guide/en/elasticsearch/reference/current/mapping-root-object-type.html#_dynamic_templates
-            // 'not_analyzed' is necessary
-            $mapping->addDynamicTemplate('dimensions', [
-                'path_match' => '__dimensionCombinations.*',
-                'match_mapping_type' => 'keyword',
-                'mapping' => [
-                    'type' => 'keyword',
-                    'index' => 'not_analyzed'
-                ]
-            ]);
-            $mapping->setPropertyByPath('__dimensionCombinationHash', [
-                'type' => 'keyword',
-                'index' => 'not_analyzed'
-            ]);
-
             $mapping->setPropertyByPath('__hierarchyRelations', [
-                'type' => 'nested',
-                'include_in_all' => false,
+                'type' => 'object',
                 'properties' => [
                     'subgraph' => [
                         'type' => 'keyword',
@@ -101,8 +85,7 @@ class NodeTypeMappingBuilder extends FlowpackMapping\NodeTypeMappingBuilder
             ]);
 
             $mapping->setPropertyByPath('__incomingReferenceEdges', [
-                'type' => 'nested',
-                'include_in_all' => false,
+                'type' => 'object',
                 'properties' => [
                     'source' => [
                         'type' => 'keyword',
@@ -118,8 +101,7 @@ class NodeTypeMappingBuilder extends FlowpackMapping\NodeTypeMappingBuilder
             ]);
 
             $mapping->setPropertyByPath('__outgoingReferenceEdges', [
-                'type' => 'nested',
-                'include_in_all' => false,
+                'type' => 'object',
                 'properties' => [
                     'target' => [
                         'type' => 'keyword',
