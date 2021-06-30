@@ -17,7 +17,7 @@ use Flowpack\ElasticSearch\Mapping\MappingCollection;
 use Neos\Error\Messages\Warning;
 use Neos\Flow\Annotations as Flow;
 use Neos\ContentRepository\Domain\Model\NodeType;
-use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Driver\Version5\Mapping as FlowpackMapping;
+use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Driver\Version6\Mapping as FlowpackMapping;
 
 /**
  * Builds the mapping information for Content Repository Node Types in Elastic Search

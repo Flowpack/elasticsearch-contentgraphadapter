@@ -184,7 +184,7 @@ class NodeIndexer extends AbstractNodeIndexer
         return $index;
     }
 
-    public function indexNode(NodeInterface $node, $targetWorkspace = null)
+    public function indexNode(NodeInterface $node, $targetWorkspace = null): void
     {
         // Not going to happen
     }
@@ -300,7 +300,7 @@ class NodeIndexer extends AbstractNodeIndexer
      *
      * @param NodeInterface $node
      */
-    public function removeNode(NodeInterface $node)
+    public function removeNode(NodeInterface $node): void
     {
         if ($this->settings['indexAllWorkspaces'] === false) {
             if ($node->getContext()->getWorkspaceName() !== 'live') {
@@ -328,7 +328,7 @@ class NodeIndexer extends AbstractNodeIndexer
      *
      * @return void
      */
-    public function flush()
+    public function flush(): void
     {
         if (count($this->currentBulkRequest) === 0) {
             return;

@@ -32,7 +32,7 @@ class IndexingHelper extends \Neos\ContentRepository\Search\Eel\IndexingHelper
      * @param array <NodeInterface> $nodes
      * @return array
      */
-    public function convertArrayOfNodesToArrayOfNodeIdentifiers($nodes)
+    public function convertArrayOfNodesToArrayOfNodeIdentifiers($nodes): array
     {
         if (!is_array($nodes) && !$nodes instanceof \Traversable) {
             return [];

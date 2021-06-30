@@ -28,6 +28,7 @@ use Neos\ContentRepository\Domain\Utility\NodePaths;
 use Neos\ContentRepository\Exception\NodeException;
 use Neos\ContentRepository\InMemoryGraph\ContentSubgraph\TraversableNode;
 use Neos\ContentRepository\InMemoryGraph\Dimension\LegacyConfigurationAndWorkspaceBasedContentDimensionSource;
+use Neos\EventSourcedContentRepository\Domain\Context\NodeAggregate\OriginDimensionSpacePoint;
 use Neos\EventSourcedContentRepository\Domain\ValueObject\PropertyName;
 use Neos\Flow\Annotations as Flow;
 
@@ -249,7 +250,7 @@ final class LegacyNodeAdapter implements ContentRepository\Model\NodeInterface, 
         $this->handleLegacyOperation();
     }
 
-    public function getNode($path): NodeInterface
+    public function getNode($path): ?NodeInterface
     {
         $child = $this->node;
         foreach (NodePath::fromString($path) as $nodeName) {
