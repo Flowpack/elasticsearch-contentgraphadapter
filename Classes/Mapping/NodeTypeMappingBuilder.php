@@ -44,8 +44,11 @@ class NodeTypeMappingBuilder extends FlowpackMapping\NodeTypeMappingBuilder
                 continue;
             }
 
-            $type = $index->findType(self::convertNodeTypeNameToMappingName($nodeTypeName));
-            $mapping = new Mapping($type);
+            if ($this->nodeTypeIndexingConfiguration->isIndexable($nodeType) === false) {
+                continue;
+            }
+
+            $mapping = new Mapping($index->findType($nodeTypeName));
             $fullConfiguration = $nodeType->getFullConfiguration();
             if (isset($fullConfiguration['search']['elasticSearchMapping'])) {
                 $mapping->setFullMapping($fullConfiguration['search']['elasticSearchMapping']);
@@ -55,17 +58,13 @@ class NodeTypeMappingBuilder extends FlowpackMapping\NodeTypeMappingBuilder
                 'type' => 'object',
                 'properties' => [
                     'subgraph' => [
-                        'type' => 'keyword',
-                        'include_in_all' => false,
-                        'index' => 'not_analyzed',
+                        'type' => 'keyword'
                     ],
                     'sortIndex' => [
                         'type' => 'integer'
                     ],
                     'accessRoles' => [
-                        'type' => 'keyword',
-                        'include_in_all' => false,
-                        'index' => 'not_analyzed',
+                        'type' => 'keyword'
                     ],
                     'hidden' => [
                         'type' => 'boolean'
@@ -88,14 +87,10 @@ class NodeTypeMappingBuilder extends FlowpackMapping\NodeTypeMappingBuilder
                 'type' => 'object',
                 'properties' => [
                     'source' => [
-                        'type' => 'keyword',
-                        'include_in_all' => false,
-                        'index' => 'not_analyzed',
+                        'type' => 'keyword'
                     ],
                     'name' => [
-                        'type' => 'keyword',
-                        'include_in_all' => false,
-                        'index' => 'not_analyzed',
+                        'type' => 'keyword'
                     ]
                 ]
             ]);
@@ -104,14 +99,10 @@ class NodeTypeMappingBuilder extends FlowpackMapping\NodeTypeMappingBuilder
                 'type' => 'object',
                 'properties' => [
                     'target' => [
-                        'type' => 'keyword',
-                        'include_in_all' => false,
-                        'index' => 'not_analyzed',
+                        'type' => 'keyword'
                     ],
                     'name' => [
-                        'type' => 'keyword',
-                        'include_in_all' => false,
-                        'index' => 'not_analyzed',
+                        'type' => 'keyword'
                     ],
                     'sortIndex' => [
                         'type' => 'integer'
@@ -120,10 +111,16 @@ class NodeTypeMappingBuilder extends FlowpackMapping\NodeTypeMappingBuilder
             ]);
 
             foreach ($nodeType->getProperties() as $propertyName => $propertyConfiguration) {
+                // This property is configured to not be index, so do not add a mapping for it
+                if (isset($propertyConfiguration['search']) && array_key_exists('indexing', $propertyConfiguration['search']) && $propertyConfiguration['search']['indexing'] === false) {
+                    continue;
+                }
+
                 if (isset($propertyConfiguration['search']['elasticSearchMapping'])) {
                     if (is_array($propertyConfiguration['search']['elasticSearchMapping'])) {
-                        $propertyMapping = $propertyConfiguration['search']['elasticSearchMapping'];
-                        $this->migrateConfigurationForElasticVersion5($propertyMapping);
+                        $propertyMapping = array_filter($propertyConfiguration['search']['elasticSearchMapping'], static function ($value) {
+                            return $value !== null;
+                        });
                         $mapping->setPropertyByPath($propertyName, $propertyMapping);
                     }
                 } elseif (isset($propertyConfiguration['type'], $this->defaultConfigurationPerType[$propertyConfiguration['type']]['elasticSearchMapping'])) {

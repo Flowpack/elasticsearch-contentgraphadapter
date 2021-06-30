@@ -14,7 +14,7 @@ namespace Flowpack\ElasticSearch\ContentGraphAdapter\Indexer;
 use Flowpack\ElasticSearch\ContentGraphAdapter\NodeAggregate\LegacyNodeAdapter;
 use Flowpack\ElasticSearch\ContentRepositoryAdaptor\ElasticSearchClient;
 use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Exception;
-use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Driver\Version5\Mapping\NodeTypeMappingBuilder;
+use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Driver\Version6\Mapping\NodeTypeMappingBuilder;
 use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Driver\IndexerDriverInterface;
 use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Driver\IndexDriverInterface;
 use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Driver\RequestDriverInterface;
@@ -34,6 +34,8 @@ use Neos\ContentRepository\Domain\Model\NodeInterface;
 use Neos\ContentRepository\Domain\Service\ContentDimensionCombinator;
 use Neos\ContentRepository\Domain\Service\ContextFactory;
 use Neos\ContentRepository\Domain\Service\NodeTypeManager;
+use Neos\Flow\Log\Utility\LogEnvironment;
+use Psr\Log\LoggerInterface;
 
 /**
  * Indexer for Content Repository Nodes. Triggered from the NodeIndexingManager.
@@ -77,7 +79,7 @@ class NodeIndexer extends AbstractNodeIndexer
 
     /**
      * @Flow\Inject
-     * @var \Flowpack\ElasticSearch\ContentRepositoryAdaptor\LoggerInterface
+     * @var LoggerInterface
      */
     protected $logger;
 
@@ -215,7 +217,7 @@ class NodeIndexer extends AbstractNodeIndexer
             $nodeAdapter = new LegacyNodeAdapter($virtualVariant);
             $fulltextIndexOfNode = [];
             $nodePropertiesToBeStoredInIndex = $this->extractPropertiesAndFulltext($nodeAdapter, $fulltextIndexOfNode, function ($propertyName) use ($nodeAdapter) {
-                $this->logger->log(sprintf('NodeIndexer (%s) - Property "%s" not indexed because no configuration found.', $nodeAdapter->getIdentifier(), $propertyName), LOG_DEBUG, null, 'ElasticSearch (CR)');
+                $this->logger->debug(sprintf('NodeIndexer (%s) - Property "%s" not indexed because no configuration found.', $nodeAdapter->getIdentifier(), $propertyName), LogEnvironment::fromMethodName(__METHOD__));
             });
 
             $document = new ElasticSearchDocument(
@@ -265,16 +267,14 @@ class NodeIndexer extends AbstractNodeIndexer
                 'dimensionSpacePoint' => $virtualVariant->getDimensionSpacePoint()
             ]);
 
-            $this->logger->log(
+            $this->logger->debug(
                 sprintf(
                     'NodeIndexer: Added / updated node %s. ID: %s Context: %s',
                     $serializedVariant,
                     $virtualVariant->getCacheEntryIdentifier(),
                     json_encode($nodeAdapter->getContext()->getProperties())
                 ),
-                LOG_DEBUG,
-                null,
-                'ElasticSearch (CR)'
+                LogEnvironment::fromMethodName(__METHOD__)
             );
         }
     }
@@ -320,7 +320,7 @@ class NodeIndexer extends AbstractNodeIndexer
             ]
         ];
 
-        $this->logger->log(sprintf('NodeIndexer: Removed node %s from index (node actually removed). Persistence ID: %s', $node->getContextPath(), $identifier), LOG_DEBUG, null, 'ElasticSearch (CR)');
+        $this->logger->debug(sprintf('NodeIndexer: Removed node %s from index (node actually removed). Persistence ID: %s', $node->getContextPath(), $identifier), LogEnvironment::fromMethodName(__METHOD__));
     }
 
     /**
@@ -344,7 +344,7 @@ class NodeIndexer extends AbstractNodeIndexer
             foreach ($bulkRequestTuple as $bulkRequestItem) {
                 $itemAsJson = json_encode($bulkRequestItem);
                 if ($itemAsJson === false) {
-                    $this->logger->log('Indexing Error: Bulk request item could not be encoded as JSON - ' . json_last_error_msg(), LOG_ERR, $bulkRequestItem);
+                    $this->logger->error('Indexing Error: Bulk request item could not be encoded as JSON - ' . json_last_error_msg(), $bulkRequestItem);
                     continue 2;
                 }
                 $tupleAsJson .= $itemAsJson . chr(10);
@@ -360,7 +360,7 @@ class NodeIndexer extends AbstractNodeIndexer
             $response = $this->requestDriver->bulk($this->getIndex(), $content);
             foreach ($response as $responseLine) {
                 if (isset($response['errors']) && $response['errors'] !== false) {
-                    $this->logger->log('Indexing Error: Error during bulk request - ' . $responseLine, LOG_ERR);
+                    $this->logger->error('Indexing Error: Error during bulk request - ' . $responseLine);
                 }
             }
         }
@@ -378,7 +378,7 @@ class NodeIndexer extends AbstractNodeIndexer
         foreach (explode("\n", $responseAsLines) as $responseLine) {
             $response = json_decode($responseLine);
             if (!is_object($response) || (isset($response->errors) && $response->errors !== false)) {
-                $this->logger->log('Indexing Error: ' . $responseLine, LOG_ERR);
+                $this->logger->error('Indexing Error: ' . $responseLine);
             }
         }
     }
