@@ -320,13 +320,15 @@ class GraphIndexNewCommandController extends CommandController
         $dimensionsValues = $dimensionSpacePoint->getCoordinates();
         $dimensionsValues = $this->configureNodeIndexer($dimensionsValues, $postfix);
 
-        $this->outputLine(json_encode($dimensionsValues));
-        $this->outputLine($this->nodeIndexer->getIndexName());
-        $time = time();
+        $this->outputLine("Build index for dimensionValues %s", [json_encode($dimensionsValues)]);
+
+
+        $timeStart = microtime(true);
         if ($this->displayProgress) {
             $this->output->progressStart(count($graph->getNodes()));
         }
 
+        $nodesIndexed = 0;
         $nodesSinceLastFlush = 0;
         foreach ($graph->getNodes() as $node) {
             $include = false;
@@ -350,6 +352,7 @@ class GraphIndexNewCommandController extends CommandController
 
             $this->nodeIndexer->indexGraphNode($node, $dimensionSpacePoint);
             $nodesSinceLastFlush++;
+            $nodesIndexed++;
 
             if ($nodesSinceLastFlush >= $this->batchSize) {
                 $this->nodeIndexer->flush();
@@ -360,8 +363,12 @@ class GraphIndexNewCommandController extends CommandController
         if ($this->displayProgress) {
             $this->output->progressFinish();
         }
-        $timeSpent = time() - $time;
-        $this->logger->info('Done. Indexed ' . count($graph->getNodes()) . ' nodes in ' . $timeSpent);
+
+        $timeSpent = number_format(microtime(true) - $timeStart, 2);
+        $this->outputLine();
+        $this->outputLine('<success>Done</success> (took %s seconds, %s nodes indexed)', [$timeSpent, $nodesIndexed]);
+
+        $this->logger->info('Done. Indexed ' . $nodesIndexed . ' nodes in ' . $timeSpent);
         $this->nodeIndexer->getIndex()->refresh();
     }
 
