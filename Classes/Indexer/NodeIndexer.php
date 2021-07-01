@@ -11,16 +11,10 @@ namespace Flowpack\ElasticSearch\ContentGraphAdapter\Indexer;
  * source code.
  */
 
+
+use Neos\Flow\Annotations as Flow;
 use Flowpack\ElasticSearch\ContentGraphAdapter\NodeAggregate\LegacyNodeAdapter;
-use Flowpack\ElasticSearch\ContentRepositoryAdaptor\ElasticSearchClient;
-use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Exception;
-use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Driver\Version6\Mapping\NodeTypeMappingBuilder;
-use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Driver\IndexerDriverInterface;
-use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Driver\IndexDriverInterface;
-use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Driver\RequestDriverInterface;
-use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Driver\SystemDriverInterface;
 use Flowpack\ElasticSearch\Domain\Model\Document as ElasticSearchDocument;
-use Flowpack\ElasticSearch\Domain\Model\Index;
 use Neos\ContentRepository\DimensionSpace\Dimension\ContentDimensionIdentifier;
 use Neos\ContentRepository\DimensionSpace\DimensionSpace\DimensionSpacePointSet;
 use Neos\ContentRepository\Domain\ContentStream\ContentStreamIdentifier;
@@ -28,14 +22,11 @@ use Neos\ContentRepository\InMemoryGraph\ContentSubgraph\ContentGraph;
 use Neos\ContentRepository\InMemoryGraph\ContentSubgraph\TraversableNode;
 use Neos\ContentRepository\InMemoryGraph\Dimension\LegacyConfigurationAndWorkspaceBasedContentDimensionSource;
 use Neos\ContentRepository\InMemoryGraph\NodeAggregate\Node;
-use Neos\ContentRepository\Search\Indexer\AbstractNodeIndexer;
-use Neos\Flow\Annotations as Flow;
+use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Indexer\NodeIndexer as BaseNodeIndexer;
+use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Indexer\BulkRequestPart;
+use Neos\ContentRepository\DimensionSpace\DimensionSpace\DimensionSpacePoint;
 use Neos\ContentRepository\Domain\Model\NodeInterface;
-use Neos\ContentRepository\Domain\Service\ContentDimensionCombinator;
-use Neos\ContentRepository\Domain\Service\ContextFactory;
-use Neos\ContentRepository\Domain\Service\NodeTypeManager;
 use Neos\Flow\Log\Utility\LogEnvironment;
-use Psr\Log\LoggerInterface;
 
 /**
  * Indexer for Content Repository Nodes. Triggered from the NodeIndexingManager.
@@ -44,147 +35,13 @@ use Psr\Log\LoggerInterface;
  *
  * @Flow\Scope("singleton")
  */
-class NodeIndexer extends AbstractNodeIndexer
+class NodeIndexer extends BaseNodeIndexer
 {
-    /**
-     * Optional postfix for the index, e.g. to have different indexes by timestamp.
-     *
-     * @var string
-     */
-    protected $indexNamePostfix = '';
-
-    /**
-     * @Flow\Inject
-     * @var ElasticSearchClient
-     */
-    protected $searchClient;
-
-    /**
-     * @Flow\Inject
-     * @var NodeTypeMappingBuilder
-     */
-    protected $nodeTypeMappingBuilder;
-
-    /**
-     * @Flow\Inject
-     * @var \Neos\Flow\Persistence\PersistenceManagerInterface
-     */
-    protected $persistenceManager;
-
-    /**
-     * @Flow\Inject
-     * @var NodeTypeManager
-     */
-    protected $nodeTypeManager;
-
-    /**
-     * @Flow\Inject
-     * @var LoggerInterface
-     */
-    protected $logger;
-
-    /**
-     * @Flow\Inject
-     * @var ContentDimensionCombinator
-     */
-    protected $contentDimensionCombinator;
-
-    /**
-     * @Flow\Inject
-     * @var ContextFactory
-     */
-    protected $contextFactory;
-
-    /**
-     * @Flow\Inject
-     * @var IndexerDriverInterface
-     */
-    protected $indexerDriver;
-
-    /**
-     * @var IndexDriverInterface
-     * @Flow\Inject
-     */
-    protected $indexDriver;
-
-    /**
-     * @var RequestDriverInterface
-     * @Flow\Inject
-     */
-    protected $requestDriver;
-
-    /**
-     * @var SystemDriverInterface
-     * @Flow\Inject
-     */
-    protected $systemDriver;
 
     /**
      * @var ContentGraph
      */
     protected $contentGraph;
-
-    /**
-     * The current ElasticSearch bulk request, in the format required by http://www.elasticsearch.org/guide/en/elasticsearch/reference/current/docs-bulk.html
-     *
-     * @var array
-     */
-    protected $currentBulkRequest = [];
-
-    /**
-     * @var boolean
-     */
-    protected $bulkProcessing = false;
-
-    /**
-     * @var array
-     */
-    protected $fulltextRootRegistry = [];
-
-    /**
-     * @var array
-     */
-    protected $fulltextRegistry = [];
-
-
-    /**
-     * Returns the index name to be used for indexing, with optional indexNamePostfix appended.
-     *
-     * @return string
-     */
-    public function getIndexName()
-    {
-        $indexName = $this->searchClient->getIndexName();
-        if (strlen($this->indexNamePostfix) > 0) {
-            $indexName .= '-' . $this->indexNamePostfix;
-        }
-
-        return $indexName;
-    }
-
-    /**
-     * Set the postfix for the index name
-     *
-     * @param string $indexNamePostfix
-     * @return void
-     */
-    public function setIndexNamePostfix($indexNamePostfix)
-    {
-        $this->indexNamePostfix = $indexNamePostfix;
-    }
-
-    /**
-     * Return the currently active index to be used for indexing
-     *
-     * @return Index
-     */
-    public function getIndex()
-    {
-        $index = $this->searchClient->findIndex($this->getIndexName());
-        $index->setSettingsKey($this->searchClient->getIndexName());
-
-        return $index;
-    }
 
     public function indexNode(NodeInterface $node, $targetWorkspace = null): void
     {
@@ -196,7 +53,7 @@ class NodeIndexer extends AbstractNodeIndexer
         $this->contentGraph = $contentGraph;
     }
 
-    public function indexGraphNode(Node $dataNode): void
+    public function indexGraphNode(Node $dataNode, DimensionSpacePoint $dimensionSpacePoint): void
     {
         $occupiedDimensionSpacePoints = new DimensionSpacePointSet([$dataNode->getOriginDimensionSpacePoint()]);
         $isFulltextRoot = IsFulltextRoot::isSatisfiedBy($dataNode);
@@ -256,9 +113,10 @@ class NodeIndexer extends AbstractNodeIndexer
                 ];
             }
 
+
             if ($isFulltextRoot) {
-                $this->currentBulkRequest[] = $this->indexerDriver->document($this->getIndexName(), $nodeAdapter, $document, $documentData);
-                $this->currentBulkRequest[] = $this->indexerDriver->fulltext($nodeAdapter, $fulltextIndexOfNode);
+                $this->currentBulkRequest[] = new BulkRequestPart($dimensionSpacePoint->getHash(), $this->indexerDriver->document($this->getIndexName(), $nodeAdapter, $document, $documentData));
+                $this->currentBulkRequest[] = new BulkRequestPart($dimensionSpacePoint->getHash(), $this->indexerDriver->fulltext($nodeAdapter, $fulltextIndexOfNode));
             }
 
             $serializedVariant = json_encode([
@@ -293,218 +151,5 @@ class NodeIndexer extends AbstractNodeIndexer
         }
 
         return $dimensionSpacePoints;
-    }
-
-    /**
-     * Schedule node removal into the current bulk request.
-     *
-     * @param NodeInterface $node
-     */
-    public function removeNode(NodeInterface $node): void
-    {
-        if ($this->settings['indexAllWorkspaces'] === false) {
-            if ($node->getContext()->getWorkspaceName() !== 'live') {
-                return;
-            }
-        }
-
-        // TODO: handle deletion from the fulltext index as well
-        $identifier = (string)DocumentIdentifier::fromLegacyNode($node);
-
-        $this->currentBulkRequest[] = [
-            [
-                'delete' => [
-                    '_type' => $this->nodeTypeMappingBuilder->convertNodeTypeNameToMappingName($node->getNodeType()),
-                    '_id' => $identifier
-                ]
-            ]
-        ];
-
-        $this->logger->debug(sprintf('NodeIndexer: Removed node %s from index (node actually removed). Persistence ID: %s', $node->getContextPath(), $identifier), LogEnvironment::fromMethodName(__METHOD__));
-    }
-
-    /**
-     * perform the current bulk request
-     *
-     * @return void
-     */
-    public function flush(): void
-    {
-        if (count($this->currentBulkRequest) === 0) {
-            return;
-        }
-
-        $content = '';
-        foreach ($this->currentBulkRequest as $bulkRequestTuple) {
-            if (!is_array($bulkRequestTuple)) {
-                continue;
-            }
-
-            $tupleAsJson = '';
-            foreach ($bulkRequestTuple as $bulkRequestItem) {
-                $itemAsJson = json_encode($bulkRequestItem);
-                if ($itemAsJson === false) {
-                    $this->logger->error('Indexing Error: Bulk request item could not be encoded as JSON - ' . json_last_error_msg(), $bulkRequestItem);
-                    continue 2;
-                }
-                $tupleAsJson .= $itemAsJson . chr(10);
-            }
-            $content .= $tupleAsJson;
-            if (strlen($content) > 10000000) {
-                $this->sendBulkRequest($content);
-                $content = '';
-            }
-        }
-
-        if ($content !== '') {
-            $response = $this->requestDriver->bulk($this->getIndex(), $content);
-            foreach ($response as $responseLine) {
-                if (isset($response['errors']) && $response['errors'] !== false) {
-                    $this->logger->error('Indexing Error: Error during bulk request - ' . json_encode($responseLine));
-                }
-            }
-        }
-
-        $this->currentBulkRequest = [];
-    }
-
-    /**
-     * @param string $content
-     * @throws \Flowpack\ElasticSearch\Exception
-     */
-    protected function sendBulkRequest($content)
-    {
-        $responseAsLines = $this->getIndex()->request('POST', '/_bulk', [], $content)->getOriginalResponse()->getContent();
-        foreach (explode("\n", $responseAsLines) as $responseLine) {
-            $response = json_decode($responseLine);
-            if (!is_object($response) || (isset($response->errors) && $response->errors !== false)) {
-                $this->logger->error('Indexing Error: ' . $responseLine);
-            }
-        }
-    }
-
-    /**
-     * Update the index alias
-     *
-     * @return void
-     * @throws Exception
-     * @throws \Flowpack\ElasticSearch\Transfer\Exception\ApiException
-     * @throws \Exception
-     */
-    public function updateIndexAlias()
-    {
-        $aliasName = $this->searchClient->getIndexName(); // The alias name is the unprefixed index name
-        if ($this->getIndexName() === $aliasName) {
-            throw new Exception('UpdateIndexAlias is only allowed to be called when $this->setIndexNamePostfix has been created.', 1383649061);
-        }
-
-        if (!$this->getIndex()->exists()) {
-            throw new Exception('The target index for updateIndexAlias does not exist. This shall never happen.', 1383649125);
-        }
-
-        $aliasActions = [];
-        try {
-            $response = $this->searchClient->request('GET', '/_alias/' . $aliasName);
-            if ($response->getStatusCode() !== 200) {
-                throw new Exception('The alias "' . $aliasName . '" was not found with some unexpected error... (return code: ' . $response->getStatusCode() . ')', 1383650137);
-            }
-
-            $indexNames = array_keys($response->getTreatedContent());
-
-            if ($indexNames === []) {
-                // if there is an actual index with the name we want to use as alias, remove it now
-                $response = $this->searchClient->request('HEAD', '/' . $aliasName);
-                if ($response->getStatusCode() === 200) {
-                    $response = $this->searchClient->request('DELETE', '/' . $aliasName);
-                    if ($response->getStatusCode() !== 200) {
-                        throw new Exception('The index "' . $aliasName . '" could not be removed to be replaced by an alias. (return code: ' . $response->getStatusCode() . ')', 1395419177);
-                    }
-                }
-            } else {
-                foreach ($indexNames as $indexName) {
-                    $aliasActions[] = [
-                        'remove' => [
-                            'index' => $indexName,
-                            'alias' => $aliasName
-                        ]
-                    ];
-                }
-            }
-        } catch (\Flowpack\ElasticSearch\Transfer\Exception\ApiException $exception) {
-            // in case of 404, do not throw an error...
-            if ($exception->getResponse()->getStatusCode() !== 404) {
-                throw $exception;
-            }
-        }
-
-        $aliasActions[] = [
-            'add' => [
-                'index' => $this->getIndexName(),
-                'alias' => $aliasName
-            ]
-        ];
-
-        $this->searchClient->request('POST', '/_aliases', [], \json_encode(['actions' => $aliasActions]));
-    }
-
-    /**
-     * Remove old indices which are not active anymore (remember, each bulk index creates a new index from scratch,
-     * making the "old" index a stale one).
-     *
-     * @return array<string> a list of index names which were removed
-     * @throws Exception
-     */
-    public function removeOldIndices()
-    {
-        $aliasName = $this->searchClient->getIndexName(); // The alias name is the unprefixed index name
-
-        $currentlyLiveIndices = $this->indexDriver->indexesByAlias($aliasName);
-
-        $indexStatus = $this->systemDriver->status();
-        $allIndices = array_keys($indexStatus['indices']);
-
-        $indicesToBeRemoved = [];
-
-        foreach ($allIndices as $indexName) {
-            if (strpos($indexName, $aliasName . '-') !== 0) {
-                // filter out all indices not starting with the alias-name, as they are unrelated to our application
-                continue;
-            }
-
-            if (array_search($indexName, $currentlyLiveIndices) !== false) {
-                // skip the currently live index names from deletion
-                continue;
-            }
-
-            $indicesToBeRemoved[] = $indexName;
-        }
-
-        array_map(function ($index) {
-            $this->indexDriver->deleteIndex($index);
-        }, $indicesToBeRemoved);
-
-        return $indicesToBeRemoved;
-    }
-
-    /**
-     * Perform indexing without checking about duplication document
-     *
-     * This is used during bulk indexing to improve performance
-     *
-     * @param callable $callback
-     * @throws \Exception
-     */
-    public function withBulkProcessing(callable $callback)
-    {
-        $bulkProcessing = $this->bulkProcessing;
-        $this->bulkProcessing = true;
-        try {
-            /** @noinspection PhpUndefinedMethodInspection */
-            $callback->__invoke();
-        } catch (\Exception $exception) {
-            $this->bulkProcessing = $bulkProcessing;
-            throw $exception;
-        }
-        $this->bulkProcessing = $bulkProcessing;
     }
 }

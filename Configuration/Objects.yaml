@@ -7,6 +7,9 @@ Flowpack\ElasticSearch\ContentRepositoryAdaptor\Driver\NodeTypeMappingBuilderInt
 Neos\ContentRepository\Search\Indexer\NodeIndexerInterface:
   className: Flowpack\ElasticSearch\ContentGraphAdapter\Indexer\NodeIndexer
 
+Neos\ContentRepository\Search\Indexer\BulkNodeIndexerInterface:
+  className: Flowpack\ElasticSearch\ContentGraphAdapter\Indexer\NodeIndexer
+
 Neos\ContentRepository\DimensionSpace\Dimension\ContentDimensionSourceInterface:
   className: Neos\ContentRepository\InMemoryGraph\Dimension\LegacyConfigurationAndWorkspaceBasedContentDimensionSource
 
