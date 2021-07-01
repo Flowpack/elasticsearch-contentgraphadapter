@@ -356,9 +356,9 @@ class GraphIndexNewCommandController extends CommandController
                 $nodesSinceLastFlush = 0;
             }
         }
-        $this->output->progressFinish();
+        $this->nodeIndexer->flush();
         if ($this->displayProgress) {
-            $this->nodeIndexer->flush();
+            $this->output->progressFinish();
         }
         $timeSpent = time() - $time;
         $this->logger->info('Done. Indexed ' . count($graph->getNodes()) . ' nodes in ' . $timeSpent);

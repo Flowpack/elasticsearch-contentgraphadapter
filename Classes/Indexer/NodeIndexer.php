@@ -37,7 +37,6 @@ use Neos\Flow\Log\Utility\LogEnvironment;
  */
 class NodeIndexer extends BaseNodeIndexer
 {
-
     /**
      * @var ContentGraph
      */
@@ -61,10 +60,20 @@ class NodeIndexer extends BaseNodeIndexer
             $occupiedDimensionSpacePoints = $this->collectOccupiedDimensionSpacePointsForFulltextRoot($dataNode, $occupiedDimensionSpacePoints);
         }
 
-        $mappingType = $this->getIndex()->findType($dataNode->getNodeType()->getName());
+        $relevantOccupiedDimensionSpacePoints = [];
         foreach ($occupiedDimensionSpacePoints as $occupiedDimensionSpacePoint) {
+            $occupiedDimensionSpacePointWithoutWorkspace = $this->removeWorkspaceFromDimensionSpacePoint($occupiedDimensionSpacePoint);
+            if ($occupiedDimensionSpacePointWithoutWorkspace->equals($dimensionSpacePoint)) {
+                $relevantOccupiedDimensionSpacePoints[] = $occupiedDimensionSpacePoint;
+            }
+        }
+
+        $mappingType = $this->getIndex()->findType($dataNode->getNodeType()->getName());
+        foreach ($relevantOccupiedDimensionSpacePoints as $occupiedDimensionSpacePoint) {
             $matchingSubgraph = $this->contentGraph->getSubgraphByIdentifier(
-                ContentStreamIdentifier::fromString($occupiedDimensionSpacePoint->getCoordinate(new ContentDimensionIdentifier(LegacyConfigurationAndWorkspaceBasedContentDimensionSource::WORKSPACE_DIMENSION_IDENTIFIER))),
+                ContentStreamIdentifier::fromString($occupiedDimensionSpacePoint->getCoordinate(
+                    new ContentDimensionIdentifier(LegacyConfigurationAndWorkspaceBasedContentDimensionSource::WORKSPACE_DIMENSION_IDENTIFIER)
+                )),
                 $occupiedDimensionSpacePoint
             );
             if (!$matchingSubgraph) {
@@ -74,7 +83,7 @@ class NodeIndexer extends BaseNodeIndexer
             $nodeAdapter = new LegacyNodeAdapter($virtualVariant);
             $fulltextIndexOfNode = [];
             $nodePropertiesToBeStoredInIndex = $this->extractPropertiesAndFulltext($nodeAdapter, $fulltextIndexOfNode, function ($propertyName) use ($nodeAdapter) {
-                $this->logger->debug(sprintf('NodeIndexer (%s) - Property "%s" not indexed because no configuration found.', $nodeAdapter->getIdentifier(), $propertyName), LogEnvironment::fromMethodName(__METHOD__));
+                #$this->logger->debug(sprintf('NodeIndexer (%s) - Property "%s" not indexed because no configuration found.', $nodeAdapter->getIdentifier(), $propertyName), LogEnvironment::fromMethodName(__METHOD__));
             });
 
             $document = new ElasticSearchDocument(
@@ -87,15 +96,18 @@ class NodeIndexer extends BaseNodeIndexer
             $documentData['__hierarchyRelations'] = [];
 
             foreach ($dataNode->getIncomingHierarchyRelations() as $incomingEdge) {
-                $documentData['__hierarchyRelations'][] = [
-                    'subgraph' => $incomingEdge->getSubgraphHash(),
-                    'sortIndex' => $incomingEdge->getPosition(),
-                    'accessRoles' => $incomingEdge->getProperty('accessRoles'),
-                    'hidden' => $incomingEdge->getProperty('hidden'),
-                    'hiddenBeforeDateTime' => $incomingEdge->getProperty('hiddenBeforeDateTime') ? $incomingEdge->getProperty('hiddenBeforeDateTime')->format('Y-m-d\TH:i:sP') : null,
-                    'hiddenAfterDateTime' => $incomingEdge->getProperty('hiddenAfterDateTime') ? $incomingEdge->getProperty('hiddenAfterDateTime')->format('Y-m-d\TH:i:sP') : null,
-                    'hiddenInIndex' => $incomingEdge->getProperty('hiddenInIndex')
-                ];
+                $incomingDimensionSpacePointWithoutWorkspace = $this->removeWorkspaceFromDimensionSpacePoint($incomingEdge->getSubgraph()->getDimensionSpacePoint());
+                if ($incomingDimensionSpacePointWithoutWorkspace->equals($dimensionSpacePoint)) {
+                    $documentData['__hierarchyRelations'][] = [
+                        'subgraph' => $incomingEdge->getSubgraphHash(),
+                        'sortIndex' => $incomingEdge->getPosition(),
+                        'accessRoles' => $incomingEdge->getProperty('accessRoles'),
+                        'hidden' => $incomingEdge->getProperty('hidden'),
+                        'hiddenBeforeDateTime' => $incomingEdge->getProperty('hiddenBeforeDateTime') ? $incomingEdge->getProperty('hiddenBeforeDateTime')->format('Y-m-d\TH:i:sP') : null,
+                        'hiddenAfterDateTime' => $incomingEdge->getProperty('hiddenAfterDateTime') ? $incomingEdge->getProperty('hiddenAfterDateTime')->format('Y-m-d\TH:i:sP') : null,
+                        'hiddenInIndex' => $incomingEdge->getProperty('hiddenInIndex')
+                    ];
+                }
             }
 
             foreach ($dataNode->getIncomingReferenceRelations() as $referenceRelation) {
@@ -113,11 +125,9 @@ class NodeIndexer extends BaseNodeIndexer
                 ];
             }
 
-
-            if ($isFulltextRoot) {
-                $this->currentBulkRequest[] = new BulkRequestPart($dimensionSpacePoint->getHash(), $this->indexerDriver->document($this->getIndexName(), $nodeAdapter, $document, $documentData));
-                $this->currentBulkRequest[] = new BulkRequestPart($dimensionSpacePoint->getHash(), $this->indexerDriver->fulltext($nodeAdapter, $fulltextIndexOfNode));
-            }
+            $hash = $this->dimensionService->hash($dimensionSpacePoint->getCoordinates());
+            $this->currentBulkRequest[] = new BulkRequestPart($hash, $this->indexerDriver->document($this->getIndexName(), $nodeAdapter, $document, $documentData));
+            $this->currentBulkRequest[] = new BulkRequestPart($hash, $this->indexerDriver->fulltext($nodeAdapter, $fulltextIndexOfNode));
 
             $serializedVariant = json_encode([
                 'nodeAggregateIdentifier' => $virtualVariant->getNodeAggregateIdentifier(),
@@ -135,6 +145,13 @@ class NodeIndexer extends BaseNodeIndexer
                 LogEnvironment::fromMethodName(__METHOD__)
             );
         }
+    }
+    private function removeWorkspaceFromDimensionSpacePoint(DimensionSpacePoint $dimensionSpacePoint): DimensionSpacePoint
+    {
+        $coordinates = $dimensionSpacePoint->getCoordinates();
+        unset($coordinates[LegacyConfigurationAndWorkspaceBasedContentDimensionSource::WORKSPACE_DIMENSION_IDENTIFIER]);
+
+        return new DimensionSpacePoint($coordinates);
     }
 
     protected function collectOccupiedDimensionSpacePointsForFulltextRoot(Node $currentNode, DimensionSpacePointSet $dimensionSpacePoints): DimensionSpacePointSet
