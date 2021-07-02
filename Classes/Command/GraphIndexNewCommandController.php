@@ -173,11 +173,6 @@ class GraphIndexNewCommandController extends CommandController
     protected $dimensionsService;
 
     /**
-     * @var boolean
-     */
-    protected $displayProgress = true;
-
-    /**
      * @var int
      */
     protected $batchSize = 100;
@@ -201,8 +196,8 @@ class GraphIndexNewCommandController extends CommandController
     {
         $this->logger->info(sprintf('Starting elasticsearch indexing %s sub processes', $this->useSubProcesses ? 'with' : 'without'), LogEnvironment::fromMethodName(__METHOD__));
 
-        if ($workspace !== null && $this->workspaceRepository->findByIdentifier($workspace) === null) {
-            $this->logger->error('The given workspace (' . $workspace . ') does not exist.', LogEnvironment::fromMethodName(__METHOD__));
+        if ($workspace !== null) {
+            $this->logger->error('Workspace indexing is not yet supported by in memory graph.');
             $this->quit(1);
         }
 
@@ -216,10 +211,6 @@ class GraphIndexNewCommandController extends CommandController
                 'postfix' => $postfix,
             ]);
         };
-
-//        $buildIndex = function (array $dimensionsValues) use ($workspace, $limit, $postfix) {
-//            $this->build($dimensionsValues, $workspace, $postfix, $limit);
-//        };
 
         $refresh = function (array $dimensionsValues) use ($postfix) {
             $this->executeInternalCommand('refreshInternal', [
@@ -251,14 +242,11 @@ class GraphIndexNewCommandController extends CommandController
             $runAndLog($updateAliases, 'Set up aliases');
         }
 
-        // $runAndLog($buildIndex, 'Indexing nodes');
-        $this->outputLine('Initializing content graph...');
-        if ($this->displayProgress) {
-            $graph = $this->graphService->getContentGraph($this->output);
-        } else {
-            $graph = $this->graphService->getContentGraph();
-        }
+        $timeStart = microtime(true);
+        $this->output(str_pad('Initializing graph' . '... ', 20));
+        $graph = $this->graphService->getContentGraph();
         $this->nodeIndexer->setContentGraph($graph);
+        $this->outputLine('<success>Done</success> (took %s seconds)', [number_format(microtime(true) - $timeStart, 2)]);
 
         $dimensionSpacePointSet = $this->contentDimensionZookeeper->getAllowedDimensionSubspace();
         $workspaceDimensionIdentifier = new ContentDimensionIdentifier('_workspace');
@@ -320,23 +308,15 @@ class GraphIndexNewCommandController extends CommandController
         $dimensionsValues = $dimensionSpacePoint->getCoordinates();
         $dimensionsValues = $this->configureNodeIndexer($dimensionsValues, $postfix);
 
-        $this->outputLine("Build index for dimensionValues %s", [json_encode($dimensionsValues)]);
-
+        $this->output("Indexing dimension %s" . '... ' , [json_encode($dimensionsValues)]);
 
         $timeStart = microtime(true);
-        if ($this->displayProgress) {
-            $this->output->progressStart(count($graph->getNodes()));
-        }
 
         $nodesIndexed = 0;
+        $indexedHierarchyRelations = 0;
         $nodesSinceLastFlush = 0;
         foreach ($graph->getNodes() as $node) {
             $include = false;
-
-            if ($this->displayProgress) {
-                $this->output->progressAdvance();
-            }
-
             foreach($node->getIncomingHierarchyRelations() as $hierarchyRelation){
                 $relationDimensionsValues = $hierarchyRelation->getSubgraph()->getDimensionSpacePoint()->getCoordinates();
                 unset($relationDimensionsValues['_workspace']);
@@ -351,6 +331,7 @@ class GraphIndexNewCommandController extends CommandController
             }
 
             $this->nodeIndexer->indexGraphNode($node, $dimensionSpacePoint);
+            $indexedHierarchyRelations += count($node->getIncomingHierarchyRelations());
             $nodesSinceLastFlush++;
             $nodesIndexed++;
 
@@ -358,15 +339,16 @@ class GraphIndexNewCommandController extends CommandController
                 $this->nodeIndexer->flush();
                 $nodesSinceLastFlush = 0;
             }
-        }
-        $this->nodeIndexer->flush();
-        if ($this->displayProgress) {
-            $this->output->progressFinish();
+
+            if ($limit > 0 && $nodesIndexed > $limit) {
+                break;
+            }
         }
 
+        $this->nodeIndexer->flush();
+
         $timeSpent = number_format(microtime(true) - $timeStart, 2);
-        $this->outputLine();
-        $this->outputLine('<success>Done</success> (took %s seconds, %s nodes indexed)', [$timeSpent, $nodesIndexed]);
+        $this->outputLine('<success>Done</success> (%s nodes and %s edges indexed, took %s seconds)', [$nodesIndexed, $indexedHierarchyRelations, $timeSpent]);
 
         $this->logger->info('Done. Indexed ' . $nodesIndexed . ' nodes in ' . $timeSpent);
         $this->nodeIndexer->getIndex()->refresh();

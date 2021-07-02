@@ -82,9 +82,7 @@ class NodeIndexer extends BaseNodeIndexer
             $virtualVariant = new TraversableNode($dataNode, $matchingSubgraph);
             $nodeAdapter = new LegacyNodeAdapter($virtualVariant);
             $fulltextIndexOfNode = [];
-            $nodePropertiesToBeStoredInIndex = $this->extractPropertiesAndFulltext($nodeAdapter, $fulltextIndexOfNode, function ($propertyName) use ($nodeAdapter) {
-                #$this->logger->debug(sprintf('NodeIndexer (%s) - Property "%s" not indexed because no configuration found.', $nodeAdapter->getIdentifier(), $propertyName), LogEnvironment::fromMethodName(__METHOD__));
-            });
+            $nodePropertiesToBeStoredInIndex = $this->extractPropertiesAndFulltext($nodeAdapter, $fulltextIndexOfNode);
 
             $document = new ElasticSearchDocument(
                 $mappingType,
