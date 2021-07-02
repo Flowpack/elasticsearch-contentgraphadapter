@@ -137,6 +137,12 @@ class GraphIndexNewCommandController extends CommandController
 
     /**
      * @Flow\Inject
+     * @var DimensionsService
+     */
+    protected $dimensionService;
+
+    /**
+     * @Flow\Inject
      * @var WorkspaceIndexer
      */
     protected $workspaceIndexer;
@@ -249,15 +255,9 @@ class GraphIndexNewCommandController extends CommandController
         $this->nodeIndexer->setContentGraph($graph);
         $this->outputLine('<success>Done</success> (took %s seconds)', [number_format(microtime(true) - $timeStart, 2)]);
 
-        $dimensionSpacePointSet = $this->contentDimensionZookeeper->getAllowedDimensionSubspace();
-        $workspaceDimensionIdentifier = new ContentDimensionIdentifier('_workspace');
-        foreach ($dimensionSpacePointSet as $dimensionSpacePoint) {
-            if ($dimensionSpacePoint->getCoordinate($workspaceDimensionIdentifier) === 'live') {
-                $coordinates = $dimensionSpacePoint->getCoordinates();
-                unset($coordinates['_workspace']);
-                $dimensionSpacepointWithoutWorkspace = new DimensionSpacePoint($coordinates);
-                $this->buildIndexForDimensionSpacePoint($graph, $dimensionSpacepointWithoutWorkspace, $postfix, $limit);
-            }
+        $dimensionCombinations = new ArrayCollection($this->contentDimensionCombinator->getAllAllowedCombinations());
+        foreach ($dimensionCombinations as $dimensionCombination) {
+            $this->buildIndexForDimensionSpacePoint($graph, $dimensionCombination, $postfix, $limit);
         }
 
         $runAndLog($refresh, 'Refresh indicies');
@@ -296,7 +296,7 @@ class GraphIndexNewCommandController extends CommandController
      * Build up the node index
      *
      * @param ContentGraph $graph
-     * @param DimensionSpacePoint $dimensionSpacePoint
+     * @param array $dimensionValues
      * @param string|null $postfix
      * @param int|null $limit
      * @throws ConfigurationException
@@ -304,10 +304,11 @@ class GraphIndexNewCommandController extends CommandController
      * @throws RuntimeException
      * @throws SubProcessException
      */
-    private function buildIndexForDimensionSpacePoint(ContentGraph $graph, DimensionSpacePoint $dimensionSpacePoint, string $postfix, $limit = null): void
+    private function buildIndexForDimensionSpacePoint(ContentGraph $graph, array $dimensionValues, string $postfix, $limit = null): void
     {
-        $dimensionsValues = $dimensionSpacePoint->getCoordinates();
-        $dimensionsValues = $this->configureNodeIndexer($dimensionsValues, $postfix);
+        $dimensionsValues = $this->configureNodeIndexer($dimensionValues, $postfix);
+        $dimensionSpacePoint = DimensionSpacePoint::fromLegacyDimensionArray($dimensionsValues);
+        $dimensionHash = $this->dimensionService->hash($dimensionsValues);
 
         $this->output("Indexing dimension %s" . '... ' , [json_encode($dimensionsValues)]);
 
@@ -331,7 +332,7 @@ class GraphIndexNewCommandController extends CommandController
                 continue;
             }
 
-            $this->nodeIndexer->indexGraphNode($node, $dimensionSpacePoint);
+            $this->nodeIndexer->indexGraphNode($node, $dimensionSpacePoint, $dimensionHash);
             $indexedHierarchyRelations += count($node->getIncomingHierarchyRelations());
             $nodesSinceLastFlush++;
             $nodesIndexed++;

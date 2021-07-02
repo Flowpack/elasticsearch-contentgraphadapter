@@ -52,7 +52,7 @@ class NodeIndexer extends BaseNodeIndexer
         $this->contentGraph = $contentGraph;
     }
 
-    public function indexGraphNode(Node $dataNode, DimensionSpacePoint $dimensionSpacePoint): void
+    public function indexGraphNode(Node $dataNode, DimensionSpacePoint $dimensionSpacePoint, string $dimensionHash): void
     {
         $occupiedDimensionSpacePoints = new DimensionSpacePointSet([$dataNode->getOriginDimensionSpacePoint()]);
         $isFulltextRoot = IsFulltextRoot::isSatisfiedBy($dataNode);
@@ -123,9 +123,8 @@ class NodeIndexer extends BaseNodeIndexer
                 ];
             }
 
-            $hash = $this->dimensionService->hash($dimensionSpacePoint->getCoordinates());
-            $this->currentBulkRequest[] = new BulkRequestPart($hash, $this->indexerDriver->document($this->getIndexName(), $nodeAdapter, $document, $documentData));
-            $this->currentBulkRequest[] = new BulkRequestPart($hash, $this->indexerDriver->fulltext($nodeAdapter, $fulltextIndexOfNode));
+            $this->currentBulkRequest[] = new BulkRequestPart($dimensionHash, $this->indexerDriver->document($this->getIndexName(), $nodeAdapter, $document, $documentData));
+            $this->currentBulkRequest[] = new BulkRequestPart($dimensionHash, $this->indexerDriver->fulltext($nodeAdapter, $fulltextIndexOfNode));
 
             $serializedVariant = json_encode([
                 'nodeAggregateIdentifier' => $virtualVariant->getNodeAggregateIdentifier(),
