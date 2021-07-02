@@ -174,8 +174,9 @@ class GraphIndexNewCommandController extends CommandController
 
     /**
      * @var int
+     * @Flow\InjectConfiguration(path="indexing.batchSize.elements", package="Flowpack.ElasticSearch.ContentRepositoryAdaptor")
      */
-    protected $batchSize = 100;
+    protected $batchSize;
 
     /**
      * Index all nodes by creating a new index and when everything was completed, switch the index alias.
