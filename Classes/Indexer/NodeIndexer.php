@@ -109,7 +109,11 @@ class NodeIndexer extends BaseNodeIndexer
         }
 
         $this->currentBulkRequest[] = new BulkRequestPart($dimensionHash, $this->indexerDriver->document($this->getIndexName(), $nodeAdapter, $document, $documentData));
-        $this->currentBulkRequest[] = new BulkRequestPart($dimensionHash, $this->indexerDriver->fulltext($nodeAdapter, $fulltextIndexOfNode));
+        if ($this->isFulltextEnabled($nodeAdapter)) {
+            $this->currentBulkRequest[] = new BulkRequestPart($dimensionHash, $this->indexerDriver->fulltext($nodeAdapter, $fulltextIndexOfNode));
+        }
+
+        $this->flushIfNeeded();
 
         $serializedVariant = json_encode([
             'nodeAggregateIdentifier' => $virtualVariant->getNodeAggregateIdentifier(),
