@@ -42,7 +42,7 @@ final class WorkspaceIndexingMode
      *                            ┌────────────────┐
      *                            │ P:live,user-me │ <--- visible in user-me only due to fallback
      *                            └────────────────┘      thus only indexed in live, visible in user-me
-     *                             ╱             ╲        but without upserted content from C:user-me but from C:live
+     *                             ╱             ╲        but with upserted content not from C:user-me but from C:live
      *                            ╱               ╲
      *                      ┌────▼────┐    ┌───────▼─────┐
      * indexed in live ---> │  C:live │    │  C:user-me  │ <--- indexed in user-me
