@@ -13,7 +13,10 @@ namespace Flowpack\ElasticSearch\ContentGraphAdapter\Command;
  * source code.
  */
 
+use Flowpack\ElasticSearch\ContentGraphAdapter\Domain\WorkspaceIndexingMode;
 use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Service\DimensionsService;
+use Neos\ContentRepository\DimensionSpace\Dimension\ContentDimensionIdentifier;
+use Neos\ContentRepository\InMemoryGraph\Dimension\LegacyConfigurationAndWorkspaceBasedContentDimensionSource;
 use Neos\Flow\Annotations as Flow;
 use Doctrine\Common\Collections\ArrayCollection;
 use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Driver\IndexDriverInterface;
@@ -70,6 +73,12 @@ class GraphIndexCommandController extends CommandController
      * @Flow\InjectConfiguration(path="command.useSubProcesses", package="Flowpack.ElasticSearch.ContentRepositoryAdaptor")
      */
     protected $useSubProcesses = true;
+
+    /**
+     * @var string
+     * @Flow\InjectConfiguration(path="indexing.workspaceIndexingMode")
+     */
+    protected $workspaceIndexingMode;
 
     /**
      * @Flow\Inject
@@ -160,7 +169,6 @@ class GraphIndexCommandController extends CommandController
      * @var GraphService
      */
     protected $graphService;
-
 
     /**
      * @Flow\Inject
@@ -313,7 +321,12 @@ class GraphIndexCommandController extends CommandController
         $nodesIndexed = 0;
         $indexedHierarchyRelations = 0;
         $nodesSinceLastFlush = 0;
+        $workspaceIndexingMode = WorkspaceIndexingMode::fromString($this->workspaceIndexingMode);
+        $workspaceDimensionIdentifier = new ContentDimensionIdentifier(LegacyConfigurationAndWorkspaceBasedContentDimensionSource::WORKSPACE_DIMENSION_IDENTIFIER);
         foreach ($graph->getNodes() as $node) {
+            if (!$workspaceIndexingMode->isNodeToBeIndexed($node)) {
+                continue;
+            }
             $includedDimensionSpacePoints = [];
             foreach($node->getIncomingHierarchyRelations() as $hierarchyRelation){
                 $relationDimensionSpacePoint = $hierarchyRelation->getSubgraph()->getDimensionSpacePoint();
@@ -321,7 +334,20 @@ class GraphIndexCommandController extends CommandController
                 unset($relationDimensionsValues['_workspace']);
                 $relationDimensionSpacePointWithoutWorkspace = new DimensionSpacePoint($relationDimensionsValues);
                 if ($dimensionSpacePoint->equals($relationDimensionSpacePointWithoutWorkspace)) {
-                    $includedDimensionSpacePoints[] = $relationDimensionSpacePoint;
+                    $includeDimensionSpacePoint = false;
+                    switch ($workspaceIndexingMode->getValue()) {
+                        case WorkspaceIndexingMode::MODE_ONLY_LIVE:
+                            $includeDimensionSpacePoint = $relationDimensionSpacePoint->getCoordinate($workspaceDimensionIdentifier) === 'live';
+                        break;
+                        case WorkspaceIndexingMode::MODE_ONLY_ORIGIN:
+                            $includeDimensionSpacePoint = $relationDimensionSpacePoint->equals($node->getOriginDimensionSpacePoint());
+                        break;
+                        case WorkspaceIndexingMode::MODE_FULL:
+                            $includeDimensionSpacePoint = true;
+                    }
+                    if ($includeDimensionSpacePoint) {
+                        $includedDimensionSpacePoints[] = $relationDimensionSpacePoint;
+                    }
                 }
             }
 
