@@ -4,7 +4,7 @@ declare(strict_types=1);
 namespace Flowpack\ElasticSearch\ContentGraphAdapter\Command;
 
 /*
- * This file is part of the CORE4.Neos.ElasticSearch.ContentGraphAdapter package.
+ * This file is part of the Flowpack.ElasticSearch.ContentGraphAdapter package.
  *
  * (c) Contributors of the Neos Project - www.neos.io
  *
@@ -14,7 +14,6 @@ namespace Flowpack\ElasticSearch\ContentGraphAdapter\Command;
  */
 
 use Flowpack\ElasticSearch\ContentGraphAdapter\Domain\WorkspaceIndexingMode;
-use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Service\DimensionsService;
 use Neos\ContentRepository\DimensionSpace\Dimension\ContentDimensionIdentifier;
 use Neos\ContentRepository\InMemoryGraph\Dimension\LegacyConfigurationAndWorkspaceBasedContentDimensionSource;
 use Neos\Flow\Annotations as Flow;
@@ -26,6 +25,8 @@ use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Exception;
 use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Exception\ConfigurationException;
 use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Exception\RuntimeException;
 use Flowpack\ElasticSearch\ContentGraphAdapter\Indexer\NodeIndexer;
+use Flowpack\ElasticSearch\ContentGraphAdapter\Mapping\NodeTypeMappingBuilder;
+use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Service\DimensionsService;
 use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Indexer\WorkspaceIndexer;
 use Flowpack\ElasticSearch\Domain\Model\Mapping;
 use Flowpack\ElasticSearch\Transfer\Exception\ApiException;
@@ -38,7 +39,6 @@ use Neos\ContentRepository\Domain\Service\Context;
 use Neos\ContentRepository\Domain\Service\ContextFactoryInterface;
 use Neos\ContentRepository\InMemoryGraph\ContentSubgraph\ContentGraph;
 use Neos\ContentRepository\InMemoryGraph\ContentSubgraph\GraphService;
-use Neos\ContentRepository\DimensionSpace\DimensionSpace\ContentDimensionZookeeper;
 use Neos\Flow\Cli\CommandController;
 use Neos\Flow\Cli\Exception\StopCommandException;
 use Neos\Flow\Configuration\ConfigurationManager;
@@ -46,7 +46,6 @@ use Neos\Flow\Core\Booting\Exception\SubProcessException;
 use Neos\Flow\Core\Booting\Scripts;
 use Neos\Flow\Log\Utility\LogEnvironment;
 use Neos\Utility\Files;
-use Flowpack\ElasticSearch\ContentGraphAdapter\Mapping\NodeTypeMappingBuilder;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -171,12 +170,6 @@ class GraphIndexCommandController extends CommandController
     protected $graphService;
 
     /**
-     * @Flow\Inject
-     * @var ContentDimensionZookeeper
-     */
-    protected $contentDimensionZookeeper;
-
-    /**
      * @var DimensionsService
      * @Flow\Inject
      */
@@ -197,13 +190,14 @@ class GraphIndexCommandController extends CommandController
      * @param bool $update if TRUE, do not throw away the index at the start. Should *only be used for development*.
      * @param string|null $workspace name of the workspace which should be indexed
      * @param string|null $postfix Index postfix, index with the same postfix will be deleted if exist
+     * @param bool $displayProgress Show progress during indexing
      * @return void
      * @throws StopCommandException
      * @throws Exception
      * @throws ConfigurationException
      * @throws ApiException
      */
-    public function buildCommand(int $limit = null, bool $update = false, string $workspace = null, string $postfix = null): void
+    public function buildCommand(int $limit = null, bool $update = false, string $workspace = null, string $postfix = null, bool $displayProgress = false): void
     {
         $this->logger->info(sprintf('Starting elasticsearch indexing %s sub processes', $this->useSubProcesses ? 'with' : 'without'), LogEnvironment::fromMethodName(__METHOD__));
 
@@ -255,13 +249,19 @@ class GraphIndexCommandController extends CommandController
 
         $timeStart = microtime(true);
         $this->output(str_pad('Initializing graph' . '... ', 20));
-        $graph = $this->graphService->getContentGraph();
+        if ($displayProgress) {
+            $this->outputLine();
+            $graph = $this->graphService->getContentGraph($this->output);
+            $this->outputLine();
+        } else {
+            $graph = $this->graphService->getContentGraph();
+        }
         $this->nodeIndexer->setContentGraph($graph);
         $this->outputLine('<success>Done</success> (took %s seconds)', [number_format(microtime(true) - $timeStart, 2)]);
 
         $dimensionCombinations = new ArrayCollection($this->contentDimensionCombinator->getAllAllowedCombinations());
         foreach ($dimensionCombinations as $dimensionCombination) {
-            $this->buildIndexForDimensionValues($graph, $dimensionCombination, $postfix, $limit);
+            $this->buildIndexForDimensionValues($graph, $dimensionCombination, $postfix, $limit, $displayProgress);
         }
 
         $runAndLog($refresh, 'Refresh indicies');
@@ -303,12 +303,13 @@ class GraphIndexCommandController extends CommandController
      * @param array $dimensionValues
      * @param string|null $postfix
      * @param int|null $limit
+     * @param bool $displayProgress
      * @throws ConfigurationException
      * @throws Exception
      * @throws RuntimeException
      * @throws SubProcessException
      */
-    private function buildIndexForDimensionValues(ContentGraph $graph, array $dimensionValues, string $postfix, $limit = null): void
+    private function buildIndexForDimensionValues(ContentGraph $graph, array $dimensionValues, string $postfix, $limit = null, bool $displayProgress = false): void
     {
         $dimensionsValues = $this->configureNodeIndexer($dimensionValues, $postfix);
         $dimensionSpacePoint = DimensionSpacePoint::fromLegacyDimensionArray($dimensionsValues);
@@ -317,12 +318,18 @@ class GraphIndexCommandController extends CommandController
         $this->output("Indexing dimension %s" . '... ' , [json_encode($dimensionsValues)]);
 
         $timeStart = microtime(true);
-
         $nodesIndexed = 0;
         $indexedHierarchyRelations = 0;
         $nodesSinceLastFlush = 0;
         $workspaceIndexingMode = WorkspaceIndexingMode::fromString($this->workspaceIndexingMode);
         $workspaceDimensionIdentifier = new ContentDimensionIdentifier(LegacyConfigurationAndWorkspaceBasedContentDimensionSource::WORKSPACE_DIMENSION_IDENTIFIER);
+
+        $timeStart = microtime(true);
+
+        if ($displayProgress) {
+            $this->outputLine();
+            $this->output->progressStart(count($graph->getNodes()));
+        }
         foreach ($graph->getNodes() as $node) {
             if (!$workspaceIndexingMode->isNodeToBeIndexed($node)) {
                 continue;
@@ -351,6 +358,10 @@ class GraphIndexCommandController extends CommandController
                 }
             }
 
+            if ($displayProgress) {
+                $this->output->progressAdvance();
+            }
+
             if (empty($includedDimensionSpacePoints)) {
                 continue;
             }
@@ -358,15 +369,9 @@ class GraphIndexCommandController extends CommandController
             foreach ($includedDimensionSpacePoints as $includedDimensionSpacePoint) {
                 $this->nodeIndexer->indexGraphNode($node, $includedDimensionSpacePoint, $dimensionHash);
                 $indexedHierarchyRelations += count($node->getIncomingHierarchyRelations());
-                $nodesSinceLastFlush++;
             }
 
             $nodesIndexed++;
-
-            if ($nodesSinceLastFlush >= $this->batchSize) {
-                $this->nodeIndexer->flush();
-                $nodesSinceLastFlush = 0;
-            }
 
             if ($limit > 0 && $nodesIndexed > $limit) {
                 break;
@@ -374,6 +379,11 @@ class GraphIndexCommandController extends CommandController
         }
 
         $this->nodeIndexer->flush();
+
+        if ($displayProgress) {
+            $this->output->progressFinish();
+            $this->outputLine();
+        }
 
         $timeSpent = number_format(microtime(true) - $timeStart, 2);
         $this->outputLine('<success>Done</success> (%s nodes and %s edges indexed, took %s seconds)', [$nodesIndexed, $indexedHierarchyRelations, $timeSpent]);

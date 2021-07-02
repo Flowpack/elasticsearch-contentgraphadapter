@@ -11,8 +11,6 @@ namespace Flowpack\ElasticSearch\ContentGraphAdapter\Domain;
  * source code.
  */
 
-use Neos\ContentRepository\DimensionSpace\DimensionSpace\DimensionSpacePoint;
-use Neos\ContentRepository\InMemoryGraph\Dimension\LegacyConfigurationAndWorkspaceBasedContentDimensionSource;
 use Neos\ContentRepository\InMemoryGraph\NodeAggregate\Node;
 use Neos\Flow\Annotations as Flow;
 
@@ -43,8 +41,8 @@ final class WorkspaceIndexingMode
      *
      *                            ┌────────────────┐
      *                            │ P:live,user-me │ <--- visible in user-me only due to fallback
-     *                            └────────────────┘      thus only indexed in live
-     *                             ╱             ╲
+     *                            └────────────────┘      thus only indexed in live, visible in user-me
+     *                             ╱             ╲        but without upserted content from C:user-me but from C:live
      *                            ╱               ╲
      *                      ┌────▼────┐    ┌───────▼─────┐
      * indexed in live ---> │  C:live │    │  C:user-me  │ <--- indexed in user-me
