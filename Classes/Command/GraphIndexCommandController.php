@@ -1,4 +1,5 @@
 <?php
+declare(strict_types=1);
 
 namespace Flowpack\ElasticSearch\ContentGraphAdapter\Command;
 
@@ -11,26 +12,71 @@ namespace Flowpack\ElasticSearch\ContentGraphAdapter\Command;
  * information, please view the LICENSE file which was distributed with this
  * source code.
  */
+
+use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Service\DimensionsService;
+use Neos\Flow\Annotations as Flow;
+use Doctrine\Common\Collections\ArrayCollection;
+use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Driver\IndexDriverInterface;
+use Flowpack\ElasticSearch\ContentRepositoryAdaptor\ElasticSearchClient;
+use Flowpack\ElasticSearch\ContentRepositoryAdaptor\ErrorHandling\ErrorHandlingService;
+use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Exception;
+use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Exception\ConfigurationException;
+use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Exception\RuntimeException;
 use Flowpack\ElasticSearch\ContentGraphAdapter\Indexer\NodeIndexer;
-use Flowpack\ElasticSearch\ContentGraphAdapter\Mapping\NodeTypeMappingBuilder;
-use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Exception as CRAException;
-use Psr\Log\LoggerInterface;
+use Flowpack\ElasticSearch\ContentRepositoryAdaptor\Indexer\WorkspaceIndexer;
 use Flowpack\ElasticSearch\Domain\Model\Mapping;
 use Flowpack\ElasticSearch\Transfer\Exception\ApiException;
-use Neos\Flow\Configuration\ConfigurationManager;
-use Neos\Flow\ObjectManagement\ObjectManagerInterface;
+use Neos\ContentRepository\DimensionSpace\DimensionSpace\DimensionSpacePoint;
+use Neos\ContentRepository\Domain\Repository\NodeDataRepository;
+use Neos\ContentRepository\Domain\Repository\WorkspaceRepository;
+use Neos\ContentRepository\Domain\Service\ContentDimensionCombinator;
+use Neos\ContentRepository\Domain\Service\ContentDimensionPresetSourceInterface;
+use Neos\ContentRepository\Domain\Service\Context;
+use Neos\ContentRepository\Domain\Service\ContextFactoryInterface;
+use Neos\ContentRepository\InMemoryGraph\ContentSubgraph\ContentGraph;
 use Neos\ContentRepository\InMemoryGraph\ContentSubgraph\GraphService;
-use Neos\Flow\Annotations as Flow;
+use Neos\ContentRepository\DimensionSpace\DimensionSpace\ContentDimensionZookeeper;
 use Neos\Flow\Cli\CommandController;
-use Neos\ContentRepository\Domain as ContentRepository;
+use Neos\Flow\Cli\Exception\StopCommandException;
+use Neos\Flow\Configuration\ConfigurationManager;
+use Neos\Flow\Core\Booting\Exception\SubProcessException;
+use Neos\Flow\Core\Booting\Scripts;
+use Neos\Flow\Log\Utility\LogEnvironment;
+use Neos\Utility\Files;
+use Flowpack\ElasticSearch\ContentGraphAdapter\Mapping\NodeTypeMappingBuilder;
+use Psr\Log\LoggerInterface;
 
 /**
- * Provides CLI features for graph index handling
+ * Provides CLI features for index handling
  *
  * @Flow\Scope("singleton")
  */
 class GraphIndexCommandController extends CommandController
 {
+    /**
+     * @Flow\InjectConfiguration(package="Neos.Flow")
+     * @var array
+     */
+    protected $flowSettings;
+
+    /**
+     * @var array
+     * @Flow\InjectConfiguration(package="Neos.ContentRepository.Search")
+     */
+    protected $settings;
+
+    /**
+     * @var bool
+     * @Flow\InjectConfiguration(path="command.useSubProcesses", package="Flowpack.ElasticSearch.ContentRepositoryAdaptor")
+     */
+    protected $useSubProcesses = true;
+
+    /**
+     * @Flow\Inject
+     * @var ErrorHandlingService
+     */
+    protected $errorHandlingService;
+
     /**
      * @Flow\Inject
      * @var NodeIndexer
@@ -39,9 +85,21 @@ class GraphIndexCommandController extends CommandController
 
     /**
      * @Flow\Inject
-     * @var ContentRepository\Repository\NodeDataRepository
+     * @var WorkspaceRepository
+     */
+    protected $workspaceRepository;
+
+    /**
+     * @Flow\Inject
+     * @var NodeDataRepository
      */
     protected $nodeDataRepository;
+
+    /**
+     * @Flow\Inject
+     * @var ContentDimensionPresetSourceInterface
+     */
+    protected $contentDimensionPresetSource;
 
     /**
      * @Flow\Inject
@@ -63,152 +121,470 @@ class GraphIndexCommandController extends CommandController
 
     /**
      * @Flow\Inject
+     * @var ContextFactoryInterface
+     */
+    protected $contextFactory;
+
+    /**
+     * @Flow\Inject
+     * @var ContentDimensionCombinator
+     */
+    protected $contentDimensionCombinator;
+
+    /**
+     * @Flow\Inject
+     * @var DimensionsService
+     */
+    protected $dimensionService;
+
+    /**
+     * @Flow\Inject
+     * @var WorkspaceIndexer
+     */
+    protected $workspaceIndexer;
+
+    /**
+     * @Flow\Inject
+     * @var ElasticSearchClient
+     */
+    protected $searchClient;
+
+    /**
+     * @var IndexDriverInterface
+     * @Flow\Inject
+     */
+    protected $indexDriver;
+
+    /**
+     * @Flow\Inject
      * @var GraphService
      */
     protected $graphService;
 
+
     /**
-     * @Flow\InjectConfiguration(path="indexing.batchSize")
+     * @Flow\Inject
+     * @var ContentDimensionZookeeper
+     */
+    protected $contentDimensionZookeeper;
+
+    /**
+     * @var DimensionsService
+     * @Flow\Inject
+     */
+    protected $dimensionsService;
+
+    /**
      * @var int
+     * @Flow\InjectConfiguration(path="indexing.batchSize.elements", package="Flowpack.ElasticSearch.ContentRepositoryAdaptor")
      */
     protected $batchSize;
-
-    /**
-     * @Flow\InjectConfiguration(path="indexing.displayProgress")
-     * @var bool
-     */
-    protected $displayProgress;
-
-    /**
-     * @var array
-     */
-    protected $settings;
-
-    public function initializeObject($cause)
-    {
-        if ($cause === ObjectManagerInterface::INITIALIZATIONCAUSE_CREATED) {
-            $this->settings = $this->configurationManager->getConfiguration(ConfigurationManager::CONFIGURATION_TYPE_SETTINGS,
-                'Neos.ContentRepository.Search');
-        }
-    }
 
     /**
      * Index all nodes by creating a new index and when everything was completed, switch the index alias.
      *
      * This command (re-)indexes all nodes contained in the content repository and sets the schema beforehand.
      *
-     * @param integer $limit Amount of nodes to index at maximum
-     * @param boolean $update if TRUE, do not throw away the index at the start. Should *only be used for development*.
-     * @param string $workspace name of the workspace which should be indexed
-     * @param string $postfix Index postfix, index with the same postifix will be deleted if exist
-     * @param bool $displayProgress
+     * @param int|null $limit Amount of nodes to index at maximum
+     * @param bool $update if TRUE, do not throw away the index at the start. Should *only be used for development*.
+     * @param string|null $workspace name of the workspace which should be indexed
+     * @param string|null $postfix Index postfix, index with the same postfix will be deleted if exist
      * @return void
+     * @throws StopCommandException
+     * @throws Exception
+     * @throws ConfigurationException
      * @throws ApiException
-     * @throws CRAException
      */
-    public function buildCommand($limit = null, $update = false, $workspace = null, $postfix = '', bool $displayProgress = false): void
+    public function buildCommand(int $limit = null, bool $update = false, string $workspace = null, string $postfix = null): void
     {
-        $displayProgress = $displayProgress || $this->displayProgress;
-        $this->createNewIndex($postfix);
-        $this->applyMapping();
+        $this->logger->info(sprintf('Starting elasticsearch indexing %s sub processes', $this->useSubProcesses ? 'with' : 'without'), LogEnvironment::fromMethodName(__METHOD__));
 
-        $this->logger->info(sprintf('Indexing %snodes ... ', ($limit !== null ? 'the first ' . $limit . ' ' : '')));
-
-        $this->outputLine('Initializing content graph...');
-        if ($displayProgress) {
-            $graph = $this->graphService->getContentGraph($this->output);
-        } else {
-            $graph = $this->graphService->getContentGraph();
+        if ($workspace !== null) {
+            $this->logger->error('Workspace indexing is not yet supported by in memory graph.');
+            $this->quit(1);
         }
 
-        $this->outputLine('Indexing content graph...');
-        $time = time();
-        if ($displayProgress) {
-            $this->output->progressStart(count($graph->getNodes()));
+        $postfix = (string)($postfix ?: time());
+        $this->nodeIndexer->setIndexNamePostfix($postfix);
+
+        $createIndicesAndApplyMapping = function (array $dimensionsValues) use ($update, $postfix) {
+            $this->executeInternalCommand('createInternal', [
+                'dimensionsValues' => json_encode($dimensionsValues),
+                'update' => $update,
+                'postfix' => $postfix,
+            ]);
+        };
+
+        $refresh = function (array $dimensionsValues) use ($postfix) {
+            $this->executeInternalCommand('refreshInternal', [
+                'dimensionsValues' => json_encode($dimensionsValues),
+                'postfix' => $postfix,
+            ]);
+        };
+
+        $updateAliases = function (array $dimensionsValues) use ($update, $postfix) {
+            $this->executeInternalCommand('aliasInternal', [
+                'dimensionsValues' => json_encode($dimensionsValues),
+                'postfix' => $postfix,
+                'update' => $update,
+            ]);
+        };
+
+        $combinations = new ArrayCollection($this->contentDimensionCombinator->getAllAllowedCombinations());
+
+        $runAndLog = function ($command, string $stepInfo) use ($combinations) {
+            $timeStart = microtime(true);
+            $this->output(str_pad($stepInfo . '... ', 20));
+            $combinations->map($command);
+            $this->outputLine('<success>Done</success> (took %s seconds)', [number_format(microtime(true) - $timeStart, 2)]);
+        };
+
+        $runAndLog($createIndicesAndApplyMapping, 'Creating indices and apply mapping');
+
+        if ($this->aliasesExist() === false) {
+            $runAndLog($updateAliases, 'Set up aliases');
         }
+
+        $timeStart = microtime(true);
+        $this->output(str_pad('Initializing graph' . '... ', 20));
+        $graph = $this->graphService->getContentGraph();
+        $this->nodeIndexer->setContentGraph($graph);
+        $this->outputLine('<success>Done</success> (took %s seconds)', [number_format(microtime(true) - $timeStart, 2)]);
+
+        $dimensionCombinations = new ArrayCollection($this->contentDimensionCombinator->getAllAllowedCombinations());
+        foreach ($dimensionCombinations as $dimensionCombination) {
+            $this->buildIndexForDimensionValues($graph, $dimensionCombination, $postfix, $limit);
+        }
+
+        $runAndLog($refresh, 'Refresh indicies');
+        $runAndLog($updateAliases, 'Update aliases');
+
+        $this->outputLine('Update main alias');
+        $this->nodeIndexer->updateMainAlias();
+
+        $this->outputLine();
+        $this->outputMemoryUsage();
+    }
+
+    /**
+     * @return bool
+     * @throws ApiException
+     * @throws ConfigurationException
+     * @throws Exception
+     */
+    private function aliasesExist(): bool
+    {
+        $aliasName = $this->searchClient->getIndexName();
+        $aliasesExist = false;
+        try {
+            $aliasesExist = $this->indexDriver->getIndexNamesByAlias($aliasName) !== [];
+        } catch (ApiException $exception) {
+            // in case of 404, do not throw an error...
+            if ($exception->getResponse()->getStatusCode() !== 404) {
+                throw $exception;
+            }
+        }
+
+        return $aliasesExist;
+    }
+
+    /**
+     * Build up the node index
+     *
+     * @param ContentGraph $graph
+     * @param array $dimensionValues
+     * @param string|null $postfix
+     * @param int|null $limit
+     * @throws ConfigurationException
+     * @throws Exception
+     * @throws RuntimeException
+     * @throws SubProcessException
+     */
+    private function buildIndexForDimensionValues(ContentGraph $graph, array $dimensionValues, string $postfix, $limit = null): void
+    {
+        $dimensionsValues = $this->configureNodeIndexer($dimensionValues, $postfix);
+        $dimensionSpacePoint = DimensionSpacePoint::fromLegacyDimensionArray($dimensionsValues);
+        $dimensionHash = $this->dimensionService->hash($dimensionsValues);
+
+        $this->output("Indexing dimension %s" . '... ' , [json_encode($dimensionsValues)]);
+
+        $timeStart = microtime(true);
+
+        $nodesIndexed = 0;
         $indexedHierarchyRelations = 0;
         $nodesSinceLastFlush = 0;
-        $this->nodeIndexer->setContentGraph($graph);
         foreach ($graph->getNodes() as $node) {
-            $this->nodeIndexer->indexGraphNode($node);
-            $nodesSinceLastFlush++;
-            $indexedHierarchyRelations += count($node->getIncomingHierarchyRelations());
-            if ($displayProgress) {
-                $this->output->progressAdvance();
+            $includedDimensionSpacePoints = [];
+            foreach($node->getIncomingHierarchyRelations() as $hierarchyRelation){
+                $relationDimensionSpacePoint = $hierarchyRelation->getSubgraph()->getDimensionSpacePoint();
+                $relationDimensionsValues = $relationDimensionSpacePoint->getCoordinates();
+                unset($relationDimensionsValues['_workspace']);
+                $relationDimensionSpacePointWithoutWorkspace = new DimensionSpacePoint($relationDimensionsValues);
+                if ($dimensionSpacePoint->equals($relationDimensionSpacePointWithoutWorkspace)) {
+                    $includedDimensionSpacePoints[] = $relationDimensionSpacePoint;
+                }
             }
+
+            if (empty($includedDimensionSpacePoints)) {
+                continue;
+            }
+
+            foreach ($includedDimensionSpacePoints as $includedDimensionSpacePoint) {
+                $this->nodeIndexer->indexGraphNode($node, $includedDimensionSpacePoint, $dimensionHash);
+                $indexedHierarchyRelations += count($node->getIncomingHierarchyRelations());
+                $nodesSinceLastFlush++;
+            }
+
+            $nodesIndexed++;
+
             if ($nodesSinceLastFlush >= $this->batchSize) {
                 $this->nodeIndexer->flush();
                 $nodesSinceLastFlush = 0;
             }
+
+            if ($limit > 0 && $nodesIndexed > $limit) {
+                break;
+            }
         }
-        $this->output->progressFinish();
-        if ($displayProgress) {
-            $this->nodeIndexer->flush();
+
+        $this->nodeIndexer->flush();
+
+        $timeSpent = number_format(microtime(true) - $timeStart, 2);
+        $this->outputLine('<success>Done</success> (%s nodes and %s edges indexed, took %s seconds)', [$nodesIndexed, $indexedHierarchyRelations, $timeSpent]);
+
+        $this->logger->info('Done. Indexed ' . $nodesIndexed . ' nodes in ' . $timeSpent);
+        $this->nodeIndexer->getIndex()->refresh();
+    }
+
+    /**
+     * Internal sub-command to create an index and apply the mapping
+     *
+     * @param string $dimensionsValues
+     * @param bool $update
+     * @param string|null $postfix
+     * @throws Exception
+     * @throws \Flowpack\ElasticSearch\Exception
+     * @throws \Neos\Flow\Http\Exception
+     * @throws \Exception
+     * @Flow\Internal
+     */
+    public function createInternalCommand(string $dimensionsValues, bool $update = false, string $postfix = null): void
+    {
+        if ($update === true) {
+            $this->logger->warning('!!! Update Mode (Development) active!', LogEnvironment::fromMethodName(__METHOD__));
+        } else {
+            $dimensionsValuesArray = $this->configureNodeIndexer(json_decode($dimensionsValues, true), $postfix);
+            if ($this->nodeIndexer->getIndex()->exists() === true) {
+                $this->logger->warning(sprintf('Deleted index with the same postfix (%s)!', $postfix), LogEnvironment::fromMethodName(__METHOD__));
+                $this->nodeIndexer->getIndex()->delete();
+            }
+            $this->nodeIndexer->getIndex()->create();
+            $this->logger->info('Created index ' . $this->nodeIndexer->getIndexName() . ' with dimensions ' . json_encode($dimensionsValuesArray), LogEnvironment::fromMethodName(__METHOD__));
         }
-        $timeSpent = time() - $time;
-        $this->logger->info('Done. Indexed ' . count($graph->getNodes()) . ' nodes and ' . $indexedHierarchyRelations . ' edges in ' . $timeSpent . ' s at ' . round(count($graph->getNodes()) / $timeSpent) . ' nodes/s (' . round($indexedHierarchyRelations / $timeSpent) . ' edges/s)');
+
+        $this->applyMapping();
+        $this->outputErrorHandling();
+    }
+
+    /**
+     * @param string $workspace
+     * @param string $dimensionsValues
+     * @param string $postfix
+     * @param int|null $limit
+     * @return void
+     * @Flow\Internal
+     */
+    public function buildWorkspaceInternalCommand(string $workspace, string $dimensionsValues, string $postfix, int $limit = null): void
+    {
+        $dimensionsValuesArray = $this->configureNodeIndexer(json_decode($dimensionsValues, true), $postfix);
+
+        $workspaceLogger = function ($workspaceName, $indexedNodes, $dimensions) {
+            if ($dimensions === []) {
+                $message = 'Workspace "' . $workspaceName . '" without dimensions done. (Indexed ' . $indexedNodes . ' nodes)';
+            } else {
+                $message = 'Workspace "' . $workspaceName . '" and dimensions "' . json_encode($dimensions) . '" done. (Indexed ' . $indexedNodes . ' nodes)';
+            }
+            $this->outputLine($message);
+        };
+
+        $this->workspaceIndexer->indexWithDimensions($workspace, $dimensionsValuesArray, $limit, $workspaceLogger);
+
+        $this->outputErrorHandling();
+    }
+
+    /**
+     * Internal subcommand to refresh the index
+     *
+     * @param string $dimensionsValues
+     * @param string $postfix
+     * @throws Exception
+     * @throws \Flowpack\ElasticSearch\Exception
+     * @throws \Neos\Flow\Http\Exception
+     * @throws ConfigurationException
+     * @Flow\Internal
+     */
+    public function refreshInternalCommand(string $dimensionsValues, string $postfix): void
+    {
+        $this->configureNodeIndexer(json_decode($dimensionsValues, true), $postfix);
+
+        $this->logger->info(vsprintf('Refreshing index %s', [$this->nodeIndexer->getIndexName()]), LogEnvironment::fromMethodName(__METHOD__));
         $this->nodeIndexer->getIndex()->refresh();
 
-        // TODO: smoke tests
-        if ($update === false) {
-            $this->nodeIndexer->updateIndexAlias();
+        $this->outputErrorHandling();
+    }
+
+    /**
+     * @param string $dimensionsValues
+     * @param string $postfix
+     * @param bool $update
+     * @throws Exception
+     * @throws \Flowpack\ElasticSearch\Exception
+     * @throws ApiException
+     * @throws ConfigurationException
+     * @Flow\Internal
+     */
+    public function aliasInternalCommand(string $dimensionsValues, string $postfix, bool $update = false): void
+    {
+        if ($update === true) {
+            return;
         }
+        $this->configureNodeIndexer(json_decode($dimensionsValues, true), $postfix);
+
+        $this->logger->info(vsprintf('Update alias for index %s', [$this->nodeIndexer->getIndexName()]), LogEnvironment::fromMethodName(__METHOD__));
+        $this->nodeIndexer->updateIndexAlias();
+        $this->outputErrorHandling();
+    }
+
+    /**
+     * @param array $dimensionsValues
+     * @param string $postfix
+     * @return array
+     */
+    private function configureNodeIndexer(array $dimensionsValues, string $postfix): array
+    {
+        $this->nodeIndexer->setIndexNamePostfix($postfix);
+        $this->nodeIndexer->setDimensions($dimensionsValues);
+        return $dimensionsValues;
     }
 
     /**
      * Clean up old indexes (i.e. all but the current one)
      *
      * @return void
-     * @throws \Flowpack\ElasticSearch\ContentRepositoryAdaptor\Exception
+     * @throws ConfigurationException
+     * @throws Exception
      */
-    public function cleanupCommand()
+    public function cleanupCommand(): void
     {
-        try {
-            $indicesToBeRemoved = $this->nodeIndexer->removeOldIndices();
-            if (count($indicesToBeRemoved) > 0) {
-                foreach ($indicesToBeRemoved as $indexToBeRemoved) {
-                    $this->logger->info('Removing old index ' . $indexToBeRemoved);
+        $removed = false;
+        $combinations = $this->contentDimensionCombinator->getAllAllowedCombinations();
+        foreach ($combinations as $dimensionsValues) {
+            try {
+                $this->nodeIndexer->setDimensions($dimensionsValues);
+                $removedIndices = $this->nodeIndexer->removeOldIndices();
+
+                foreach ($removedIndices as $indexToBeRemoved) {
+                    $removed = true;
+                    $this->logger->info('Removing old index ' . $indexToBeRemoved, LogEnvironment::fromMethodName(__METHOD__));
                 }
-            } else {
-                $this->logger->info('Nothing to remove.');
+            } catch (ApiException $exception) {
+                $exception->getResponse()->getBody()->rewind();
+                $response = json_decode($exception->getResponse()->getBody()->getContents(), false);
+                $message = sprintf('Nothing removed. ElasticSearch responded with status %s', $response->status);
+
+                if (isset($response->error->type)) {
+                    $this->logger->error(sprintf('%s, saying "%s: %s"', $message, $response->error->type, $response->error->reason), LogEnvironment::fromMethodName(__METHOD__));
+                } else {
+                    $this->logger->error(sprintf('%s, saying "%s"', $message, $response->error), LogEnvironment::fromMethodName(__METHOD__));
+                }
             }
-        } catch (ApiException $exception) {
-            $response = json_decode($exception->getResponse());
-            $this->logger->error(sprintf('Nothing removed. ElasticSearch responded with status %s, saying "%s"',
-                $response->status, $response->error));
+        }
+        if ($removed === false) {
+            $this->logger->info('Nothing to remove.', LogEnvironment::fromMethodName(__METHOD__));
         }
     }
 
-    /**
-     * Create a new index with the given $postfix.
-     *
-     * @param string $postfix
-     * @return void
-     * @throws CRAException
-     */
-    protected function createNewIndex(string $postfix): void
+    private function outputErrorHandling(): void
     {
-        $this->nodeIndexer->setIndexNamePostfix($postfix ?: (string)time());
-        if ($this->nodeIndexer->getIndex()->exists() === true) {
-            $this->logger->warning(sprintf('Deleted index with the same postfix (%s)!', $postfix));
-            $this->nodeIndexer->getIndex()->delete();
+        if ($this->errorHandlingService->hasError() === false) {
+            return;
         }
-        $this->nodeIndexer->getIndex()->create();
+
+        $this->outputLine();
+        $this->outputLine('<error>%s Errors where returned while indexing. Check your logs for more information.</error>', [$this->errorHandlingService->getErrorCount()]);
+    }
+
+    /**
+     * @param string $command
+     * @param array $arguments
+     * @return string
+     * @throws RuntimeException
+     * @throws SubProcessException
+     */
+    private function executeInternalCommand(string $command, array $arguments): string
+    {
+        ob_start(null, 1 << 20);
+
+        if ($this->useSubProcesses) {
+            $commandIdentifier = 'flowpack.elasticsearch.contentrepositoryadaptor:nodeindex:' . $command;
+            $status = Scripts::executeCommand($commandIdentifier, $this->flowSettings, true, array_filter($arguments));
+
+            if ($status !== true) {
+                throw new RuntimeException(vsprintf('Command: %s with parameters: %s', [$commandIdentifier, json_encode($arguments)]), 1426767159);
+            }
+        } else {
+            $commandIdentifier = $command . 'Command';
+            call_user_func_array([self::class, $commandIdentifier], $arguments);
+        }
+
+        return ob_get_clean();
+    }
+
+    /**
+     * Create a ContentContext based on the given workspace name
+     *
+     * @param string $workspaceName Name of the workspace to set for the context
+     * @param array $dimensions Optional list of dimensions and their values which should be set
+     * @return Context
+     */
+    private function createContentContext(string $workspaceName, array $dimensions = []): Context
+    {
+        $contextProperties = [
+            'workspaceName' => $workspaceName,
+            'invisibleContentShown' => true,
+            'inaccessibleContentShown' => true
+        ];
+
+        if ($dimensions !== []) {
+            $contextProperties['dimensions'] = $dimensions;
+            $contextProperties['targetDimensions'] = array_map(static function ($dimensionValues) {
+                return array_shift($dimensionValues);
+            }, $dimensions);
+        }
+
+        return $this->contextFactory->create($contextProperties);
     }
 
     /**
      * Apply the mapping to the current index.
      *
      * @return void
-     * @throws CRAException
+     * @throws Exception
+     * @throws \Flowpack\ElasticSearch\Exception
+     * @throws ConfigurationException
+     * @throws \Neos\Flow\Http\Exception
      */
-    protected function applyMapping(): void
+    private function applyMapping(): void
     {
         $nodeTypeMappingCollection = $this->nodeTypeMappingBuilder->buildMappingInformation($this->nodeIndexer->getIndex());
         foreach ($nodeTypeMappingCollection as $mapping) {
             /** @var Mapping $mapping */
             $mapping->apply();
         }
-        $this->logger->info('Updated Mapping.');
+    }
+
+    private function outputMemoryUsage(): void
+    {
+        $this->outputLine('! Memory usage %s', [Files::bytesToSizeString(memory_get_usage(true))]);
     }
 }

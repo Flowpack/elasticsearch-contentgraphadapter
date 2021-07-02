@@ -54,94 +54,78 @@ class NodeIndexer extends BaseNodeIndexer
 
     public function indexGraphNode(Node $dataNode, DimensionSpacePoint $dimensionSpacePoint, string $dimensionHash): void
     {
-        $occupiedDimensionSpacePoints = new DimensionSpacePointSet([$dataNode->getOriginDimensionSpacePoint()]);
-        $isFulltextRoot = IsFulltextRoot::isSatisfiedBy($dataNode);
-        if ($isFulltextRoot) {
-            $occupiedDimensionSpacePoints = $this->collectOccupiedDimensionSpacePointsForFulltextRoot($dataNode, $occupiedDimensionSpacePoints);
-        }
-
-        $relevantOccupiedDimensionSpacePoints = [];
-        foreach ($occupiedDimensionSpacePoints as $occupiedDimensionSpacePoint) {
-            $occupiedDimensionSpacePointWithoutWorkspace = $this->removeWorkspaceFromDimensionSpacePoint($occupiedDimensionSpacePoint);
-            if ($occupiedDimensionSpacePointWithoutWorkspace->equals($dimensionSpacePoint)) {
-                $relevantOccupiedDimensionSpacePoints[] = $occupiedDimensionSpacePoint;
-            }
-        }
-
         $mappingType = $this->getIndex()->findType($dataNode->getNodeType()->getName());
-        foreach ($relevantOccupiedDimensionSpacePoints as $occupiedDimensionSpacePoint) {
-            $matchingSubgraph = $this->contentGraph->getSubgraphByIdentifier(
-                ContentStreamIdentifier::fromString($occupiedDimensionSpacePoint->getCoordinate(
-                    new ContentDimensionIdentifier(LegacyConfigurationAndWorkspaceBasedContentDimensionSource::WORKSPACE_DIMENSION_IDENTIFIER)
-                )),
-                $occupiedDimensionSpacePoint
-            );
-            if (!$matchingSubgraph) {
-                continue;
-            }
-            $virtualVariant = new TraversableNode($dataNode, $matchingSubgraph);
-            $nodeAdapter = new LegacyNodeAdapter($virtualVariant);
-            $fulltextIndexOfNode = [];
-            $nodePropertiesToBeStoredInIndex = $this->extractPropertiesAndFulltext($nodeAdapter, $fulltextIndexOfNode);
-
-            $document = new ElasticSearchDocument(
-                $mappingType,
-                $nodePropertiesToBeStoredInIndex,
-                sha1($nodeAdapter->getContextPath())
-            );
-            $documentData = $document->getData();
-            $documentData['__sortIndex'] = [];
-            $documentData['__hierarchyRelations'] = [];
-
-            foreach ($dataNode->getIncomingHierarchyRelations() as $incomingEdge) {
-                $incomingDimensionSpacePointWithoutWorkspace = $this->removeWorkspaceFromDimensionSpacePoint($incomingEdge->getSubgraph()->getDimensionSpacePoint());
-                if ($incomingDimensionSpacePointWithoutWorkspace->equals($dimensionSpacePoint)) {
-                    $documentData['__hierarchyRelations'][] = [
-                        'subgraph' => $incomingEdge->getSubgraphHash(),
-                        'sortIndex' => $incomingEdge->getPosition(),
-                        'accessRoles' => $incomingEdge->getProperty('accessRoles'),
-                        'hidden' => $incomingEdge->getProperty('hidden'),
-                        'hiddenBeforeDateTime' => $incomingEdge->getProperty('hiddenBeforeDateTime') ? $incomingEdge->getProperty('hiddenBeforeDateTime')->format('Y-m-d\TH:i:sP') : null,
-                        'hiddenAfterDateTime' => $incomingEdge->getProperty('hiddenAfterDateTime') ? $incomingEdge->getProperty('hiddenAfterDateTime')->format('Y-m-d\TH:i:sP') : null,
-                        'hiddenInIndex' => $incomingEdge->getProperty('hiddenInIndex')
-                    ];
-                }
-            }
-
-            foreach ($dataNode->getIncomingReferenceRelations() as $referenceRelation) {
-                $documentData['__incomingReferenceRelations'][] = [
-                    'source' => $referenceRelation->getSource()->getNodeAggregateIdentifier(),
-                    'name' => $referenceRelation->getName()
-                ];
-            }
-
-            foreach ($dataNode->getOutgoingReferenceRelations() as $referenceRelation) {
-                $documentData['__outgoingReferenceRelations'][] = [
-                    'target' => (string)$referenceRelation->getTarget()->getIdentifier(),
-                    'name' => $referenceRelation->getName(),
-                    'sortIndex' => $referenceRelation->getPosition()
-                ];
-            }
-
-            $this->currentBulkRequest[] = new BulkRequestPart($dimensionHash, $this->indexerDriver->document($this->getIndexName(), $nodeAdapter, $document, $documentData));
-            $this->currentBulkRequest[] = new BulkRequestPart($dimensionHash, $this->indexerDriver->fulltext($nodeAdapter, $fulltextIndexOfNode));
-
-            $serializedVariant = json_encode([
-                'nodeAggregateIdentifier' => $virtualVariant->getNodeAggregateIdentifier(),
-                'contentStreamIdentifier' => $virtualVariant->getContentStreamIdentifier(),
-                'dimensionSpacePoint' => $virtualVariant->getDimensionSpacePoint()
-            ]);
-
-            $this->logger->debug(
-                sprintf(
-                    'NodeIndexer: Added / updated node %s. ID: %s Context: %s',
-                    $serializedVariant,
-                    $virtualVariant->getCacheEntryIdentifier(),
-                    json_encode($nodeAdapter->getContext()->getProperties())
-                ),
-                LogEnvironment::fromMethodName(__METHOD__)
-            );
+        $matchingSubgraph = $this->contentGraph->getSubgraphByIdentifier(
+            ContentStreamIdentifier::fromString($dimensionSpacePoint->getCoordinate(
+                new ContentDimensionIdentifier(LegacyConfigurationAndWorkspaceBasedContentDimensionSource::WORKSPACE_DIMENSION_IDENTIFIER)
+            )),
+            $dimensionSpacePoint
+        );
+        if (!$matchingSubgraph) {
+            return;
         }
+        $virtualVariant = new TraversableNode($dataNode, $matchingSubgraph);
+        $nodeAdapter = new LegacyNodeAdapter($virtualVariant);
+        $fulltextIndexOfNode = [];
+        $nodePropertiesToBeStoredInIndex = $this->extractPropertiesAndFulltext($nodeAdapter, $fulltextIndexOfNode);
+
+        $document = new ElasticSearchDocument(
+            $mappingType,
+            $nodePropertiesToBeStoredInIndex,
+            sha1($nodeAdapter->getContextPath())
+        );
+        $documentData = $document->getData();
+        $documentData['__sortIndex'] = [];
+        $documentData['__hierarchyRelations'] = [];
+
+        foreach ($dataNode->getIncomingHierarchyRelations() as $incomingEdge) {
+            $incomingDimensionSpacePointWithoutWorkspace = $this->removeWorkspaceFromDimensionSpacePoint($incomingEdge->getSubgraph()->getDimensionSpacePoint());
+            if ($incomingDimensionSpacePointWithoutWorkspace->equals($dimensionSpacePoint)) {
+                $documentData['__hierarchyRelations'][] = [
+                    'subgraph' => $incomingEdge->getSubgraphHash(),
+                    'sortIndex' => $incomingEdge->getPosition(),
+                    'accessRoles' => $incomingEdge->getProperty('accessRoles'),
+                    'hidden' => $incomingEdge->getProperty('hidden'),
+                    'hiddenBeforeDateTime' => $incomingEdge->getProperty('hiddenBeforeDateTime') ? $incomingEdge->getProperty('hiddenBeforeDateTime')->format('Y-m-d\TH:i:sP') : null,
+                    'hiddenAfterDateTime' => $incomingEdge->getProperty('hiddenAfterDateTime') ? $incomingEdge->getProperty('hiddenAfterDateTime')->format('Y-m-d\TH:i:sP') : null,
+                    'hiddenInIndex' => $incomingEdge->getProperty('hiddenInIndex')
+                ];
+            }
+        }
+
+        foreach ($dataNode->getIncomingReferenceRelations() as $referenceRelation) {
+            $documentData['__incomingReferenceRelations'][] = [
+                'source' => $referenceRelation->getSource()->getNodeAggregateIdentifier(),
+                'name' => $referenceRelation->getName()
+            ];
+        }
+
+        foreach ($dataNode->getOutgoingReferenceRelations() as $referenceRelation) {
+            $documentData['__outgoingReferenceRelations'][] = [
+                'target' => (string)$referenceRelation->getTarget()->getIdentifier(),
+                'name' => $referenceRelation->getName(),
+                'sortIndex' => $referenceRelation->getPosition()
+            ];
+        }
+
+        $this->currentBulkRequest[] = new BulkRequestPart($dimensionHash, $this->indexerDriver->document($this->getIndexName(), $nodeAdapter, $document, $documentData));
+        $this->currentBulkRequest[] = new BulkRequestPart($dimensionHash, $this->indexerDriver->fulltext($nodeAdapter, $fulltextIndexOfNode));
+
+        $serializedVariant = json_encode([
+            'nodeAggregateIdentifier' => $virtualVariant->getNodeAggregateIdentifier(),
+            'contentStreamIdentifier' => $virtualVariant->getContentStreamIdentifier(),
+            'dimensionSpacePoint' => $virtualVariant->getDimensionSpacePoint()
+        ]);
+
+        $this->logger->debug(
+            sprintf(
+                'NodeIndexer: Added / updated node %s. ID: %s Context: %s',
+                $serializedVariant,
+                $virtualVariant->getCacheEntryIdentifier(),
+                json_encode($nodeAdapter->getContext()->getProperties())
+            ),
+            LogEnvironment::fromMethodName(__METHOD__)
+        );
     }
     private function removeWorkspaceFromDimensionSpacePoint(DimensionSpacePoint $dimensionSpacePoint): DimensionSpacePoint
     {
