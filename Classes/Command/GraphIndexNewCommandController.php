@@ -257,7 +257,7 @@ class GraphIndexNewCommandController extends CommandController
 
         $dimensionCombinations = new ArrayCollection($this->contentDimensionCombinator->getAllAllowedCombinations());
         foreach ($dimensionCombinations as $dimensionCombination) {
-            $this->buildIndexForDimensionSpacePoint($graph, $dimensionCombination, $postfix, $limit);
+            $this->buildIndexForDimensionValues($graph, $dimensionCombination, $postfix, $limit);
         }
 
         $runAndLog($refresh, 'Refresh indicies');
@@ -304,7 +304,7 @@ class GraphIndexNewCommandController extends CommandController
      * @throws RuntimeException
      * @throws SubProcessException
      */
-    private function buildIndexForDimensionSpacePoint(ContentGraph $graph, array $dimensionValues, string $postfix, $limit = null): void
+    private function buildIndexForDimensionValues(ContentGraph $graph, array $dimensionValues, string $postfix, $limit = null): void
     {
         $dimensionsValues = $this->configureNodeIndexer($dimensionValues, $postfix);
         $dimensionSpacePoint = DimensionSpacePoint::fromLegacyDimensionArray($dimensionsValues);
