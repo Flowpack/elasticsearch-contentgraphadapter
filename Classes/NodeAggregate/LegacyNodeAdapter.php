@@ -28,6 +28,7 @@ use Neos\ContentRepository\Domain\Utility\NodePaths;
 use Neos\ContentRepository\Exception\NodeException;
 use Neos\ContentRepository\InMemoryGraph\ContentSubgraph\TraversableNode;
 use Neos\ContentRepository\InMemoryGraph\Dimension\LegacyConfigurationAndWorkspaceBasedContentDimensionSource;
+use Neos\EventSourcedContentRepository\Domain\Context\NodeAggregate\OriginDimensionSpacePoint;
 use Neos\EventSourcedContentRepository\Domain\ValueObject\PropertyName;
 use Neos\Flow\Annotations as Flow;
 
@@ -211,7 +212,7 @@ final class LegacyNodeAdapter implements ContentRepository\Model\NodeInterface, 
         $this->handleLegacyOperation();
     }
 
-    public function getIndex(): int
+    public function getIndex(): ?int
     {
         return $this->node->getIndex();
     }
@@ -249,7 +250,7 @@ final class LegacyNodeAdapter implements ContentRepository\Model\NodeInterface, 
         $this->handleLegacyOperation();
     }
 
-    public function getNode($path): NodeInterface
+    public function getNode($path): ?NodeInterface
     {
         $child = $this->node;
         foreach (NodePath::fromString($path) as $nodeName) {
@@ -444,9 +445,9 @@ final class LegacyNodeAdapter implements ContentRepository\Model\NodeInterface, 
      * returns the DimensionSpacePoint the node is at home in. Usually needed to address a Node in a NodeAggregate
      * in order to update it.
      *
-     * @return DimensionSpacePoint
+     * @return OriginDimensionSpacePoint
      */
-    public function getOriginDimensionSpacePoint(): DimensionSpacePoint
+    public function getOriginDimensionSpacePoint(): OriginDimensionSpacePoint
     {
         return $this->node->getOriginDimensionSpacePoint();
     }
@@ -511,5 +512,10 @@ final class LegacyNodeAdapter implements ContentRepository\Model\NodeInterface, 
     public function equals(TraversableNodeInterface $other): bool
     {
         return $this->node->equals($other);
+    }
+
+    public function __toString(): string
+    {
+        return 'Node ' . $this->getContextPath() . '[' . $this->getNodeType()->getName() . ']';
     }
 }

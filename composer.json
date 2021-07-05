@@ -3,8 +3,8 @@
     "type": "neos-package",
     "name": "flowpack/elasticsearch-contentgraphadapter",
     "require": {
-        "neos/neos": "~4.3",
-        "flowpack/elasticsearch-contentrepositoryadaptor": "~5.0",
+        "neos/neos": "~5.0 || ~7.0 || dev-master",
+        "flowpack/elasticsearch-contentrepositoryadaptor": "~7.0 || ~8.0",
         "neos/content-repository-inmemorygraph": "*"
     },
     "autoload": {

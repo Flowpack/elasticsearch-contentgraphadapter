@@ -8,5 +8,4 @@ Flowpack:
   ElasticSearch:
     ContentGraphAdapter:
       indexing:
-        batchSize: 100
-        displayProgress: false
+        workspaceIndexingMode: onlyLive
