@@ -170,25 +170,12 @@ class GraphIndexCommandController extends CommandController
     protected $graphService;
 
     /**
-     * @var DimensionsService
-     * @Flow\Inject
-     */
-    protected $dimensionsService;
-
-    /**
-     * @var int
-     * @Flow\InjectConfiguration(path="indexing.batchSize.elements", package="Flowpack.ElasticSearch.ContentRepositoryAdaptor")
-     */
-    protected $batchSize;
-
-    /**
      * Index all nodes by creating a new index and when everything was completed, switch the index alias.
      *
      * This command (re-)indexes all nodes contained in the content repository and sets the schema beforehand.
      *
      * @param int|null $limit Amount of nodes to index at maximum
      * @param bool $update if TRUE, do not throw away the index at the start. Should *only be used for development*.
-     * @param string|null $workspace name of the workspace which should be indexed
      * @param string|null $postfix Index postfix, index with the same postfix will be deleted if exist
      * @param bool $displayProgress Show progress during indexing
      * @return void
@@ -197,14 +184,11 @@ class GraphIndexCommandController extends CommandController
      * @throws ConfigurationException
      * @throws ApiException
      */
-    public function buildCommand(int $limit = null, bool $update = false, string $workspace = null, string $postfix = null, bool $displayProgress = false): void
+    public function buildCommand(int $limit = null, bool $update = false, string $postfix = null, bool $displayProgress = false): void
     {
         $this->logger->info(sprintf('Starting elasticsearch indexing %s sub processes', $this->useSubProcesses ? 'with' : 'without'), LogEnvironment::fromMethodName(__METHOD__));
 
-        if ($workspace !== null) {
-            $this->logger->error('Workspace indexing is not yet supported by in memory graph.');
-            $this->quit(1);
-        }
+        $totalTimeStart = microtime(true);
 
         $postfix = (string)($postfix ?: time());
         $this->nodeIndexer->setIndexNamePostfix($postfix);
@@ -272,6 +256,7 @@ class GraphIndexCommandController extends CommandController
 
         $this->outputLine();
         $this->outputMemoryUsage();
+        $this->outputLine('<success>Finished</success> (took %s seconds in total)', [number_format(microtime(true) - $totalTimeStart, 2)]);
     }
 
     /**
@@ -317,10 +302,8 @@ class GraphIndexCommandController extends CommandController
 
         $this->output("Indexing dimension %s" . '... ' , [json_encode($dimensionsValues)]);
 
-        $timeStart = microtime(true);
         $nodesIndexed = 0;
         $indexedHierarchyRelations = 0;
-        $nodesSinceLastFlush = 0;
         $workspaceIndexingMode = WorkspaceIndexingMode::fromString($this->workspaceIndexingMode);
         $workspaceDimensionIdentifier = new ContentDimensionIdentifier(LegacyConfigurationAndWorkspaceBasedContentDimensionSource::WORKSPACE_DIMENSION_IDENTIFIER);
 
