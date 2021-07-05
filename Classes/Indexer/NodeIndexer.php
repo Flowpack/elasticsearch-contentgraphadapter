@@ -139,6 +139,11 @@ class NodeIndexer extends BaseNodeIndexer
         return new DimensionSpacePoint($coordinates);
     }
 
+    protected function reset(): void
+    {
+        $this->currentBulkRequest = [];
+    }
+
     protected function collectOccupiedDimensionSpacePointsForFulltextRoot(Node $currentNode, DimensionSpacePointSet $dimensionSpacePoints): DimensionSpacePointSet
     {
         if (!$dimensionSpacePoints->contains($currentNode->getOriginDimensionSpacePoint())) {
