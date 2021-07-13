@@ -55,7 +55,7 @@ class NodeTypeMappingBuilder extends FlowpackMapping\NodeTypeMappingBuilder
             }
 
             $mapping->setPropertyByPath('__hierarchyRelations', [
-                'type' => 'object',
+                'type' => 'nested',
                 'properties' => [
                     'subgraph' => [
                         'type' => 'keyword'
@@ -84,7 +84,7 @@ class NodeTypeMappingBuilder extends FlowpackMapping\NodeTypeMappingBuilder
             ]);
 
             $mapping->setPropertyByPath('__incomingReferenceEdges', [
-                'type' => 'object',
+                'type' => 'nested',
                 'properties' => [
                     'source' => [
                         'type' => 'keyword'
@@ -96,7 +96,7 @@ class NodeTypeMappingBuilder extends FlowpackMapping\NodeTypeMappingBuilder
             ]);
 
             $mapping->setPropertyByPath('__outgoingReferenceEdges', [
-                'type' => 'object',
+                'type' => 'nested',
                 'properties' => [
                     'target' => [
                         'type' => 'keyword'
