@@ -80,7 +80,8 @@ class NodeIndexer extends BaseNodeIndexer
 
         foreach ($dataNode->getIncomingHierarchyRelations() as $incomingEdge) {
             $incomingDimensionSpacePointWithoutWorkspace = $this->removeWorkspaceFromDimensionSpacePoint($incomingEdge->getSubgraph()->getDimensionSpacePoint());
-            if ($incomingDimensionSpacePointWithoutWorkspace->equals($dimensionSpacePoint)) {
+            $dimensionSpacePointWithoutWorkspace = $this->removeWorkspaceFromDimensionSpacePoint($dimensionSpacePoint);
+            if ($incomingDimensionSpacePointWithoutWorkspace->equals($dimensionSpacePointWithoutWorkspace)) {
                 $documentData['__hierarchyRelations'][] = [
                     'subgraph' => $incomingEdge->getSubgraphHash(),
                     'sortIndex' => $incomingEdge->getPosition(),
